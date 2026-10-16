@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from desktop_backend import DesktopBackend
 from schedules import save_assignment
-from startup import StartupManager
+from startup import StartupManager, installed_executable, startup_manager_for_run
 from tracker import Store
 from tests.fixtures import seed_test_store
 
@@ -92,7 +92,7 @@ class StartupTests(unittest.TestCase):
     def test_login_startup_quotes_path_and_only_changes_moa(self):
         registry=FakeRegistry()
         manager=StartupManager(executable=Path("C:/Program Files/Moa/Moa.exe"))
-        with patch("startup.winreg",registry):
+        with patch("startup.winreg",registry), patch("startup.installed_executable",return_value=Path("C:/Program Files/Moa/Moa.exe")):
             self.assertFalse(manager.is_enabled())
             manager.set_enabled(True)
             self.assertTrue(manager.is_enabled())
@@ -101,3 +101,46 @@ class StartupTests(unittest.TestCase):
             manager.set_enabled(False)
             self.assertFalse(manager.is_enabled())
             self.assertEqual(registry.values["OtherApp"],"keep")
+
+    def test_source_and_test_binaries_cannot_register_startup_even_without_cli_flag(self):
+        registry=FakeRegistry()
+        with patch("startup.winreg",registry):
+            for manager in (StartupManager(),StartupManager(executable=Path("output/package/Moa.exe"))):
+                with self.assertRaises(ValueError):
+                    manager.set_enabled(True)
+            self.assertEqual(registry.values,{"OtherApp":"keep"})
+
+    def test_test_instance_cannot_remove_the_official_registration(self):
+        registry=FakeRegistry()
+        official=StartupManager(installed_executable())
+        test=StartupManager(executable=Path("output/package/Moa.exe"))
+        with patch("startup.winreg",registry):
+            official.set_enabled(True)
+            test.set_enabled(False)
+            self.assertEqual(registry.values["Moa"],official.command)
+            official.set_enabled(False)
+            self.assertNotIn("Moa",registry.values)
+
+    def test_only_installed_app_with_production_profile_can_auto_register(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ",{"LOCALAPPDATA":directory},clear=False):
+            with patch.dict("os.environ"):
+                import os
+                os.environ.pop("MOA_TEST_MODE",None)
+                os.environ.pop("MOA_DATA_DIR",None)
+                profile=Path(directory)/"Moa"
+                installed=installed_executable()
+                manager=startup_manager_for_run(profile,frozen=True,executable=installed)
+                self.assertIsNotNone(manager)
+                # Updater restarts pass an explicit but unchanged data directory.
+                self.assertTrue(manager.registration_allowed)
+                for arguments in (
+                    {"frozen":False,"executable":installed},
+                    {"frozen":True,"executable":Path("output/package/Moa.exe")},
+                    {"frozen":True,"executable":installed,"port":3848},
+                    {"frozen":True,"executable":installed,"disabled":True},
+                ):
+                    self.assertIsNone(startup_manager_for_run(profile,**arguments))
+                self.assertIsNone(startup_manager_for_run(Path(directory)/"test-profile",frozen=True,executable=installed))
+                for variable in ("MOA_TEST_MODE","MOA_DATA_DIR"):
+                    with patch.dict("os.environ",{variable:"1"}):
+                        self.assertIsNone(startup_manager_for_run(profile,frozen=True,executable=installed))

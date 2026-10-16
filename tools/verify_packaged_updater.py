@@ -61,7 +61,9 @@ def main():
             with socket.socket() as available:
                 available.bind(("127.0.0.1",0))
                 port=available.getsockname()[1]
-            app=subprocess.Popen([str(target),"--background","--data-dir",str(root),"--port",str(port),"--no-startup","--no-update-check"],env=child_environment())
+            environment=child_environment()
+            environment["MOA_TEST_MODE"]="1"
+            app=subprocess.Popen([str(target),"--background","--data-dir",str(root),"--port",str(port),"--no-startup","--no-update-check"],env=environment)
             try:
                 deadline=time.monotonic()+20
                 while True:

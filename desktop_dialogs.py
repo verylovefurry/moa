@@ -274,6 +274,8 @@ class SettingsDialog(FormDialog):
         self.start_with_windows.setChecked(startup.is_enabled() if startup else False)
         self.start_with_windows.setEnabled(startup is not None)
         self.form.addRow("자동 실행", self.start_with_windows)
+        if startup is None:
+            self.form.addRow("", muted_label("테스트 실행에서는 자동 실행을 등록하지 않습니다.\n정식 설치본에서 설정할 수 있습니다."))
         self.auto_updates = QCheckBox("새 버전을 자동으로 내려받고 정상 종료 시 설치")
         self.auto_updates.setChecked(preferences.value("auto_updates", True, type=bool))
         self.form.addRow("업데이트", self.auto_updates)

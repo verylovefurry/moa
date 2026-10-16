@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from desktop_backend import DesktopBackend, desktop_data_directory, format_clock, format_duration, format_time
 from desktop_dialogs import ConnectionDialog, HelpDialog, MonthDialog, SettingsDialog, TargetDialog, muted_label
 from desktop_schedule import SchedulePage
-from startup import StartupManager
+from startup import startup_manager_for_run
 from desktop_update import UpdateController
 from updates import cached_update, launch_installer, UpdateError
 from version import APP_VERSION
@@ -908,7 +908,7 @@ def main():
     except RuntimeError as exc:
         QMessageBox.warning(None, "모아 실행", str(exc))
         return 1
-    startup = None if args.no_startup else StartupManager()
+    startup = startup_manager_for_run(data_dir, args.port, args.no_startup)
     startup_error = None
     if startup and preferences.value("start_with_windows", True, type=bool):
         try:
