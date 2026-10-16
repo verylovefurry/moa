@@ -54,10 +54,10 @@ def main():
             result=json.loads((root/"updates"/"last-result.json").read_text(encoding="utf-8"))
             assert completed.returncode==0 and result["ok"],result
             assert file_hash(target)==digest
-            assert target.with_name("Moa.previous.exe").read_bytes()==b"MZprevious version fixture"
+            assert list(target.parent.iterdir())==[target]
             assert file_hash(db)==before
             assert not job.exists()
-            print("Frozen updater passed: parent exit, verified replacement, previous executable, database preservation.")
+            print("Frozen updater passed: parent exit, verified replacement, no leftover executable, database preservation.")
             with socket.socket() as available:
                 available.bind(("127.0.0.1",0))
                 port=available.getsockname()[1]

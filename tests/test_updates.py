@@ -127,15 +127,15 @@ class DownloadTests(unittest.TestCase):
 
 
 class InstallTests(unittest.TestCase):
-    def test_atomic_replacement_keeps_previous_executable(self):
+    def test_atomic_replacement_leaves_only_the_updated_executable(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             source,target=root/"download.exe",root/"Moa.exe"
             source.write_bytes(EXE)
             target.write_bytes(b"MZold app")
-            backup=replace_executable(source,target,DIGEST)
+            replace_executable(source,target,DIGEST)
             self.assertEqual(target.read_bytes(),EXE)
-            self.assertEqual(backup.read_bytes(),b"MZold app")
+            self.assertEqual(set(root.iterdir()), {source, target})
 
     def test_locked_target_keeps_original_and_cleans_staging(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -146,7 +146,23 @@ class InstallTests(unittest.TestCase):
             with patch("updates.os.replace",side_effect=PermissionError("locked")), self.assertRaises(UpdateError):
                 replace_executable(source,target,DIGEST,attempts=1)
             self.assertEqual(target.read_bytes(),b"MZold app")
-            self.assertFalse((root/"Moa.update-new").exists())
+            self.assertEqual(set(root.iterdir()), {source, target})
+
+    def test_failed_staging_keeps_original_and_removes_partial_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            source,target=root/"download.exe",root/"Moa.exe"
+            source.write_bytes(EXE)
+            target.write_bytes(b"MZold app")
+
+            def interrupted_copy(source, destination):
+                Path(destination).write_bytes(b"partial download")
+                raise OSError("disk full")
+
+            with patch("updates.shutil.copy2",side_effect=interrupted_copy), self.assertRaises(OSError):
+                replace_executable(source,target,DIGEST)
+            self.assertEqual(target.read_bytes(),b"MZold app")
+            self.assertEqual(set(root.iterdir()), {source, target})
 
     def test_bad_hash_does_not_touch_installed_executable(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -174,6 +190,7 @@ class InstallTests(unittest.TestCase):
                 self.assertEqual(apply_update(job),0)
             wait.assert_called_once_with(123)
             self.assertEqual(target.read_bytes(),EXE)
+            self.assertEqual(list(target.parent.iterdir()), [target])
             self.assertEqual(db.read_bytes(),b"preserve schedules and records")
             restart.assert_called_once()
             self.assertEqual(restart.call_args.kwargs["env"]["PYINSTALLER_RESET_ENVIRONMENT"],"1")

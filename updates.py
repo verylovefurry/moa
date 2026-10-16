@@ -254,18 +254,15 @@ def replace_executable(source, target, expected_hash, attempts=80):
     if file_hash(source) != expected_hash:
         raise UpdateError("설치 직전 파일 검증에 실패했습니다.")
     staged = target.with_name("Moa.update-new")
-    backup = target.with_name("Moa.previous.exe")
-    shutil.copy2(source, staged)
-    if file_hash(staged) != expected_hash:
-        staged.unlink(missing_ok=True)
-        raise UpdateError("설치 파일을 복사하는 중 검증에 실패했습니다.")
     try:
-        if target.exists():
-            shutil.copy2(target, backup)
+        shutil.copy2(source, staged)
+        if file_hash(staged) != expected_hash:
+            raise UpdateError("설치 파일을 복사하는 중 검증에 실패했습니다.")
         for attempt in range(attempts):
             try:
+                # A failed atomic replacement leaves the existing executable intact.
                 os.replace(staged, target)
-                return backup if backup.exists() else None
+                return
             except PermissionError:
                 if attempt + 1 == attempts:
                     raise UpdateError("실행 파일이 사용 중입니다. 기존 버전을 유지합니다.")
