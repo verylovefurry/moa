@@ -10,13 +10,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication, QDate, QEvent, QTime
 from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog
-from desktop import MoaWindow, configure_application
+from desktop import MoaWindow, configure_application, parse_arguments
 from desktop_backend import DesktopBackend, migrate_legacy_database
 from desktop_dialogs import AssignmentDialog, MonthDialog, SettingsDialog, TargetDialog
 from schedules import STATUSES
 from tracker import Store
 from tests.fixtures import seed_test_store
 from desktop_update import UpdateDialog
+from startup import StartupManager
+from tests.test_persistence_startup import FakeRegistry
 
 
 class DesktopTests(unittest.TestCase):
@@ -160,6 +162,45 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(settings["daily_goal"], 8)
         self.assertTrue(self.window.preferences.value("auto_updates", type=bool))
         dialog.deleteLater()
+
+    def test_portable_app_can_enable_and_disable_login_startup_in_settings(self):
+        registry=FakeRegistry()
+        portable=Path(self.temp.name)/"Desktop"/"내 작업"/"Moa.exe"
+        manager=StartupManager(executable=portable)
+        with patch("startup.winreg",registry):
+            dialog=SettingsDialog(self.window,self.backend,self.window.preferences,manager)
+            self.assertTrue(dialog.start_with_windows.isEnabled())
+            dialog.start_with_windows.setChecked(True)
+            dialog.save()
+            self.assertEqual(dialog.result(),QDialog.DialogCode.Accepted)
+            self.assertEqual(registry.values["Moa"],manager.command)
+            self.assertTrue(self.window.preferences.value("start_with_windows",type=bool))
+            dialog.start_with_windows.setChecked(False)
+            dialog.save()
+            self.assertNotIn("Moa",registry.values)
+            self.assertFalse(self.window.preferences.value("start_with_windows",type=bool))
+            dialog.deleteLater()
+
+    def test_test_mode_uses_isolated_data_and_a_free_port_without_extra_flags(self):
+        with patch.dict(os.environ),patch("desktop.is_test_build",return_value=False):
+            os.environ.pop("MOA_TEST_MODE",None)
+            normal=parse_arguments([])
+            self.assertFalse(normal.test_mode)
+            self.assertEqual(normal.port,3847)
+            self.assertIsNone(normal.data_dir)
+            test=parse_arguments(["--test-mode"])
+            self.assertTrue(test.test_mode)
+            self.assertEqual(test.port,0)
+            self.assertEqual(test.data_dir.name,"test-profile")
+            chosen=Path(self.temp.name)/"chosen-profile"
+            custom=parse_arguments(["--test-mode","--data-dir",str(chosen),"--port","3850"])
+            self.assertEqual(custom.data_dir,chosen)
+            self.assertEqual(custom.port,3850)
+            with patch("desktop.is_test_build",return_value=True):
+                moved=parse_arguments([])
+            self.assertTrue(moved.test_mode)
+            self.assertEqual(moved.port,0)
+            self.assertEqual(moved.data_dir,test.data_dir)
 
     def test_update_dialog_progress_ready_and_restart_controls(self):
         controller = self.window.updater

@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -15,6 +16,8 @@ def main():
     root = Path(__file__).resolve().parent
     destination = root / "output" / "package" if args.stage else root / "release"
     (root / "output").mkdir(exist_ok=True)
+    build_info = root / "output" / "build-info.json"
+    build_info.write_text(json.dumps({"channel":"test" if args.stage else "release","version":APP_VERSION}),encoding="utf-8")
     numbers = tuple(int(part) for part in APP_VERSION.split(".")) + (0,)
     version_info = root / "output" / "version-info.txt"
     version_info.write_text(f'''VSVersionInfo(
@@ -42,6 +45,7 @@ def main():
         "--distpath", str(destination), "--workpath", str(root / "output" / "build"),
         "--specpath", str(root / "output"),
         "--add-data", f"{root / 'browser-extension'};browser-extension",
+        "--add-data", f"{build_info};.",
         "--exclude-module", "PySide6.QtWebEngineCore",
         "--exclude-module", "PySide6.QtWebEngineWidgets",
         "--exclude-module", "PySide6.QtQml",
@@ -64,9 +68,14 @@ def main():
         if (qt / dll).is_file():
             command[3:3] = ["--add-binary", f"{qt / dll};."]
     subprocess.run(command, cwd=root, env=environment, check=True)
+    from PyInstaller.archive.readers import CArchiveReader
+    embedded = json.loads(CArchiveReader(str(destination / "Moa.exe")).extract("build-info.json"))
+    if embedded != {"channel":"test" if args.stage else "release","version":APP_VERSION}:
+        raise RuntimeError("The executable's build identity does not match the requested mode")
     with (destination / "Moa.exe").open("rb") as file:
         digest = hashlib.file_digest(file,"sha256").hexdigest()
     (destination / "Moa.exe.sha256").write_text(digest + "  Moa.exe\n", encoding="ascii")
+    (destination / "Moa.exe.build.json").write_text(json.dumps({"channel":"test" if args.stage else "release","version":APP_VERSION,"sha256":digest}),encoding="utf-8")
     print(f"Desktop executable: {destination / 'Moa.exe'}")
 
 

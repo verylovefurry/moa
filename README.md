@@ -8,9 +8,11 @@
 
 처음에는 **추적 대상이 비어 있습니다.** 왼쪽 **추적 대상 → 추가**에서 기록할 프로그램이나 URL을 지정하세요. 기본 프로그램과 샘플 작업 시간을 자동으로 등록하지 않습니다.
 
-정식 설치본은 Windows에 로그인하면 알림 영역에서 자동으로 실행되고 등록된 작업의 추적을 시작합니다. 설정에서 자동 실행을 변경할 수 있습니다. 자동 실행은 현재 Windows 계정에만 등록하며 관리자 권한이 필요하지 않습니다. 정식 설치는 아래 `install_desktop.py` 절차를 사용합니다.
+배포된 실행 파일은 바탕화면 등 원하는 폴더에서 실행해도 Windows 자동 실행을 등록할 수 있습니다. 로그인하면 알림 영역에서 실행되고 등록된 작업의 추적을 시작합니다. 설정에서 변경할 수 있으며 현재 Windows 계정에만 등록하므로 관리자 권한이 필요하지 않습니다.
 
-**소스·테스트 빌드·격리된 데이터 폴더·별도 포트로 실행한 앱은 Windows 자동 실행에 등록하지 않습니다.** `%LOCALAPPDATA%\Programs\Moa\Moa.exe`의 정식 설치본을 기본 데이터·포트로 실행할 때만 등록합니다. `--no-startup` 또는 `MOA_TEST_MODE=1`을 지정하면 등록을 차단합니다. 테스트 앱의 설정 변경으로 정식 설치본의 자동 실행을 지우지도 않습니다.
+**소스·테스트 빌드·격리된 데이터 폴더·별도 포트로 실행한 앱은 Windows 자동 실행에 등록하지 않습니다.** 실행 파일의 폴더 위치로 테스트 여부를 판단하지 않습니다. `--stage` 빌드에는 내부 테스트 표시가 포함되어 다른 폴더로 옮겨도 등록되지 않습니다. `--test-mode`, `--no-startup`, `MOA_TEST_MODE=1`로도 등록을 차단할 수 있습니다. 테스트 앱의 설정 변경으로 일반 앱의 자동 실행을 지우지도 않습니다.
+
+테스트 모드는 기본적으로 `test-profile/` 아래 별도 데이터를 사용하고 빈 포트를 자동 선택합니다. 일반 앱의 기록이나 실행 중인 창에 연결하지 않으며, 자동 업데이트로 배포판으로 바뀌지 않습니다.
 
 이미 실행 중이면 기존 창을 앞으로 가져옵니다. 기본적으로 창을 닫아도 알림 영역에서 계속 실행됩니다. 완전히 종료하려면 **파일 → 종료**, **Ctrl+Q** 또는 알림 영역 메뉴의 **종료**를 사용하세요. 닫기 동작은 설정에서 변경할 수 있습니다.
 
@@ -92,7 +94,7 @@ python desktop.py
 python -m unittest discover -s tests -v
 ```
 
-실행 파일을 다시 만들려면 `python -m pip install -r requirements-build.txt` 후 `python build_desktop.py`를 실행합니다. 결과는 `release/Moa.exe`와 `release/Moa.exe.sha256`입니다. 현재 앱을 실행한 채로 빌드할 때는 `python build_desktop.py --stage`로 `output/package/`에 생성하세요. 실행 중인 모아를 정상 종료한 뒤 `python install_desktop.py --from output/package/Moa.exe`를 실행하면 `%LOCALAPPDATA%\Programs\Moa\Moa.exe`와 `release/Moa.exe`를 갱신하고 Windows 로그인 자동 실행을 등록합니다.
+실행 파일을 다시 만들려면 `python -m pip install -r requirements-build.txt` 후 `python build_desktop.py`를 실행합니다. 결과는 `release/Moa.exe`와 `release/Moa.exe.sha256`입니다. 고정 설치 경로를 사용하려면 앱을 정상 종료한 뒤 `python install_desktop.py --from release/Moa.exe`를 실행합니다. `%LOCALAPPDATA%\Programs\Moa\Moa.exe`를 갱신하고 자동 실행을 등록합니다. `--stage`는 `output/package/`에 테스트 빌드를 생성하며 자동 실행과 정식 설치를 차단합니다.
 
 격리된 개발 실행은 `python desktop.py --data-dir output/qa-data --port 3848 --no-startup --no-update-check`으로 할 수 있습니다. Qt WebEngine은 패키징 대상에서 제외하며 화면은 Qt Widgets만 사용합니다.
 

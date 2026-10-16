@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from desktop_backend import DesktopBackend, desktop_data_directory, format_clock, format_duration, format_time
 from desktop_dialogs import ConnectionDialog, HelpDialog, MonthDialog, SettingsDialog, TargetDialog, muted_label
 from desktop_schedule import SchedulePage
-from startup import startup_manager_for_run
+from startup import startup_manager_for_run, startup_disabled_reason, is_test_build
 from desktop_update import UpdateController
 from updates import cached_update, launch_installer, UpdateError
 from version import APP_VERSION
@@ -852,14 +852,26 @@ def configure_application(app):
     QLocale.setDefault(QLocale(QLocale.Language.Korean, QLocale.Country.SouthKorea))
 
 
-def main():
+def parse_arguments(arguments=None):
     parser = argparse.ArgumentParser(description="모아 Windows 데스크톱 앱")
     parser.add_argument("--data-dir", type=Path)
-    parser.add_argument("--port", type=int, default=3847)
+    parser.add_argument("--port", type=int)
     parser.add_argument("--background", action="store_true", help="Start in the Windows notification area")
     parser.add_argument("--no-startup", action="store_true", help="Do not change login startup (development/testing)")
+    parser.add_argument("--test-mode", action="store_true", help="Run without Windows startup registration")
     parser.add_argument("--no-update-check", action="store_true", help="Disable background update checks for isolated testing")
-    args = parser.parse_args()
+    args = parser.parse_args(arguments)
+    args.test_mode = bool(args.test_mode or is_test_build() or os.environ.get("MOA_TEST_MODE"))
+    if args.port is None:
+        args.port = 0 if args.test_mode else 3847
+    if args.test_mode and args.data_dir is None:
+        args.data_dir = desktop_data_directory() / "test-profile"
+    return args
+
+
+def main():
+    args = parse_arguments()
+    updates_enabled = not (args.no_update_check or args.test_mode)
     app = QApplication(sys.argv[:1])
     configure_application(app)
     data_dir = args.data_dir or desktop_data_directory()
@@ -891,11 +903,13 @@ def main():
     restart_arguments = ["--data-dir", str(data_dir.resolve()), "--port", str(args.port)]
     if args.no_startup:
         restart_arguments.append("--no-startup")
+    if args.test_mode:
+        restart_arguments.append("--test-mode")
     if args.no_update_check:
         restart_arguments.append("--no-update-check")
     if args.background:
         restart_arguments.append("--background")
-    if getattr(sys, "frozen", False) and preferences.value("auto_updates", True, type=bool):
+    if updates_enabled and getattr(sys, "frozen", False) and preferences.value("auto_updates", True, type=bool):
         ready = cached_update(data_dir)
         if ready:
             try:
@@ -908,7 +922,7 @@ def main():
     except RuntimeError as exc:
         QMessageBox.warning(None, "모아 실행", str(exc))
         return 1
-    startup = startup_manager_for_run(data_dir, args.port, args.no_startup)
+    startup = startup_manager_for_run(data_dir, args.port, args.no_startup, test_mode=args.test_mode)
     startup_error = None
     if startup and preferences.value("start_with_windows", True, type=bool):
         try:
@@ -918,8 +932,11 @@ def main():
             logging.exception("Windows login startup registration failed")
             startup_error = str(exc)
     window = MoaWindow(backend, preferences, startup)
+    window.startup_disabled_reason = startup_disabled_reason(data_dir, args.port, args.no_startup, test_mode=args.test_mode) if startup is None else ""
     window.updater.arguments = restart_arguments
-    if not args.no_update_check:
+    if args.test_mode:
+        window.updater.can_install = False
+    if updates_enabled:
         window.updater.enable_automatic(initial=True)
     if startup_error:
         window.statusBar().showMessage("자동 실행 등록 실패: " + startup_error, 15000)

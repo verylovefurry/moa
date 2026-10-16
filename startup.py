@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -19,26 +20,45 @@ def installed_executable():
     return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Programs" / "Moa" / "Moa.exe"
 
 
-def startup_manager_for_run(data_directory, port=3847, disabled=False, *, frozen=None, executable=None):
-    """Only the installed production app may change Windows login startup.
+def is_test_build():
+    """A staged build carries its test identity even when moved or renamed."""
+    if not getattr(sys, "frozen", False):
+        return False
+    root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    try:
+        info = json.loads((root / "build-info.json").read_text(encoding="utf-8"))
+        return isinstance(info, dict) and info.get("channel") == "test"
+    except (OSError, ValueError):
+        return False
 
-    A source run, staged build, isolated profile, custom port, or explicit test
-    mode must not replace the real app's existing Run entry.
-    """
+
+def startup_disabled_reason(data_directory, port=3847, disabled=False, *, frozen=None, test_mode=False):
     frozen = getattr(sys, "frozen", False) if frozen is None else frozen
-    if disabled or not frozen or port != 3847:
-        return None
-    if os.environ.get("MOA_TEST_MODE") or os.environ.get("MOA_DATA_DIR"):
-        return None
+    if disabled:
+        return "실행 옵션으로 Windows 자동 실행 등록을 사용하지 않습니다."
+    if not frozen:
+        return "소스 코드 실행에서는 Windows 자동 실행을 등록하지 않습니다."
+    if test_mode or os.environ.get("MOA_TEST_MODE") or is_test_build():
+        return "테스트 모드에서는 Windows 자동 실행을 등록하지 않습니다."
     production_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Moa"
-    if Path(data_directory).resolve() != production_data.resolve():
+    if os.environ.get("MOA_DATA_DIR") or Path(data_directory).resolve() != production_data.resolve():
+        return "별도 데이터 폴더를 사용하는 실행에서는 자동 실행을 등록하지 않습니다."
+    if port != 3847:
+        return "별도 포트를 사용하는 실행에서는 자동 실행을 등록하지 않습니다."
+    return ""
+
+
+def startup_manager_for_run(data_directory, port=3847, disabled=False, *, frozen=None, executable=None, test_mode=False):
+    """Normal portable releases are eligible; explicit test runs stay isolated."""
+    if startup_disabled_reason(data_directory, port, disabled, frozen=frozen, test_mode=test_mode):
         return None
-    manager = StartupManager(executable=executable or sys.executable)
+    manager = StartupManager(executable=executable or sys.executable, test_mode=test_mode)
     return manager if manager.registration_allowed else None
 
 
 class StartupManager:
-    def __init__(self, executable=None, script=None):
+    def __init__(self, executable=None, script=None, test_mode=False):
+        self.test_mode = bool(test_mode or os.environ.get("MOA_TEST_MODE") or is_test_build())
         if executable is not None:
             self.arguments = [str(Path(executable).resolve()), "--background"]
         elif getattr(sys, "frozen", False):
@@ -53,7 +73,7 @@ class StartupManager:
 
     @property
     def registration_allowed(self):
-        return len(self.arguments) == 2 and Path(self.arguments[0]).resolve() == installed_executable().resolve()
+        return not self.test_mode and len(self.arguments) == 2 and Path(self.arguments[0]).suffix.lower() == ".exe"
 
     def is_enabled(self):
         if winreg is None:
@@ -67,7 +87,7 @@ class StartupManager:
 
     def set_enabled(self, enabled):
         if enabled and not self.registration_allowed:
-            raise ValueError("Windows 자동 실행은 설치된 정식 모아에서만 등록할 수 있습니다.")
+            raise ValueError("소스·테스트 실행에서는 Windows 자동 실행을 등록할 수 없습니다.")
         if winreg is None:
             if enabled:
                 raise RuntimeError("Windows에서만 자동 실행을 등록할 수 있습니다.")

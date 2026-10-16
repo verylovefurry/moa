@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 from desktop_backend import DesktopBackend
 from schedules import save_assignment
-from startup import StartupManager, installed_executable, startup_manager_for_run
+from startup import StartupManager, installed_executable, startup_manager_for_run, is_test_build, startup_disabled_reason
+from install_desktop import validate_install_source
 from tracker import Store
 from tests.fixtures import seed_test_store
 
@@ -92,7 +93,7 @@ class StartupTests(unittest.TestCase):
     def test_login_startup_quotes_path_and_only_changes_moa(self):
         registry=FakeRegistry()
         manager=StartupManager(executable=Path("C:/Program Files/Moa/Moa.exe"))
-        with patch("startup.winreg",registry), patch("startup.installed_executable",return_value=Path("C:/Program Files/Moa/Moa.exe")):
+        with patch("startup.winreg",registry):
             self.assertFalse(manager.is_enabled())
             manager.set_enabled(True)
             self.assertTrue(manager.is_enabled())
@@ -105,7 +106,7 @@ class StartupTests(unittest.TestCase):
     def test_source_and_test_binaries_cannot_register_startup_even_without_cli_flag(self):
         registry=FakeRegistry()
         with patch("startup.winreg",registry):
-            for manager in (StartupManager(),StartupManager(executable=Path("output/package/Moa.exe"))):
+            for manager in (StartupManager(),StartupManager(executable=Path("output/package/Moa.exe"),test_mode=True)):
                 with self.assertRaises(ValueError):
                     manager.set_enabled(True)
             self.assertEqual(registry.values,{"OtherApp":"keep"})
@@ -113,7 +114,7 @@ class StartupTests(unittest.TestCase):
     def test_test_instance_cannot_remove_the_official_registration(self):
         registry=FakeRegistry()
         official=StartupManager(installed_executable())
-        test=StartupManager(executable=Path("output/package/Moa.exe"))
+        test=StartupManager(executable=Path("output/package/Moa.exe"),test_mode=True)
         with patch("startup.winreg",registry):
             official.set_enabled(True)
             test.set_enabled(False)
@@ -121,7 +122,7 @@ class StartupTests(unittest.TestCase):
             official.set_enabled(False)
             self.assertNotIn("Moa",registry.values)
 
-    def test_only_installed_app_with_production_profile_can_auto_register(self):
+    def test_normal_portable_and_installed_apps_can_register_but_test_runs_cannot(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ",{"LOCALAPPDATA":directory},clear=False):
             with patch.dict("os.environ"):
                 import os
@@ -133,9 +134,14 @@ class StartupTests(unittest.TestCase):
                 self.assertIsNotNone(manager)
                 # Updater restarts pass an explicit but unchanged data directory.
                 self.assertTrue(manager.registration_allowed)
+                portable=Path(directory)/"Desktop"/"내 작업"/"Moa.exe"
+                portable_manager=startup_manager_for_run(profile,frozen=True,executable=portable)
+                self.assertIsNotNone(portable_manager)
+                self.assertTrue(portable_manager.registration_allowed)
+                self.assertIn(str(portable.resolve()),portable_manager.command)
                 for arguments in (
                     {"frozen":False,"executable":installed},
-                    {"frozen":True,"executable":Path("output/package/Moa.exe")},
+                    {"frozen":True,"executable":portable,"test_mode":True},
                     {"frozen":True,"executable":installed,"port":3848},
                     {"frozen":True,"executable":installed,"disabled":True},
                 ):
@@ -144,3 +150,26 @@ class StartupTests(unittest.TestCase):
                 for variable in ("MOA_TEST_MODE","MOA_DATA_DIR"):
                     with patch.dict("os.environ",{variable:"1"}):
                         self.assertIsNone(startup_manager_for_run(profile,frozen=True,executable=installed))
+
+    def test_embedded_test_marker_survives_a_move_to_a_normal_folder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker=Path(directory)/"build-info.json"
+            with patch("startup.sys.frozen",True,create=True),patch("startup.sys._MEIPASS",directory,create=True):
+                self.assertFalse(is_test_build())  # Legacy release without a marker.
+                marker.write_text('{"channel":"release"}',encoding="utf-8")
+                self.assertFalse(is_test_build())
+                marker.write_text('{"channel":"test"}',encoding="utf-8")
+                self.assertTrue(is_test_build())
+                self.assertFalse(StartupManager(executable=Path(directory)/"Desktop"/"Moa.exe").registration_allowed)
+                self.assertIn("테스트 모드",startup_disabled_reason(Path(directory),frozen=True))
+
+    def test_test_installer_source_is_rejected_before_changing_startup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source=Path(directory)/"Moa.exe"
+            source.write_bytes(b"MZfixture")
+            validate_install_source(source)  # Downloaded releases need no sidecar.
+            source.with_suffix(".exe.build.json").write_text('{"channel":"test"}',encoding="utf-8")
+            with self.assertRaises(ValueError):
+                validate_install_source(source)
+            source.with_suffix(".exe.build.json").write_text('{"channel":"release"}',encoding="utf-8")
+            validate_install_source(source)
