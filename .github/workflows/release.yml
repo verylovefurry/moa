@@ -16,6 +16,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: 'requirements-*.txt'
       - name: Check release version
         run: python -c "import os; from version import APP_VERSION; assert os.environ['GITHUB_REF_NAME'] == 'v' + APP_VERSION, 'Tag and APP_VERSION differ'"
       - run: python -m pip install -r requirements-build.txt
