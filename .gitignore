@@ -1,0 +1,14 @@
+data/
+__pycache__/
+*.pyc
+output/
+.playwright-cli/
+node_modules/
+release/
+.DS_Store
+dist/
+*.sqlite3*
+*.db
+*.log
+.env*
+!.env.example

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "모아 — 웹 작업 시간 연결",
+  "version": "0.1.0",
+  "minimum_chrome_version": "120",
+  "description": "등록한 작업 URL의 활성 상태를 내 컴퓨터의 모아 앱에만 전달합니다.",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "모아 연결" }
+}
