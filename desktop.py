@@ -21,8 +21,8 @@ from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
-    QProgressBar, QPushButton, QSizePolicy, QSplitter, QStackedWidget,
+    QLabel, QLayout, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
     QStyleFactory, QSystemTrayIcon, QTabBar, QTableWidget, QTableWidgetItem,
     QToolBar, QToolButton, QVBoxLayout, QWidget, QComboBox,
 )
@@ -103,7 +103,6 @@ class MoaWindow(QMainWindow):
         self._known_targets = set(self.filters)
         self._signature = ""
         self._closing = False
-        self._tray_notice = False
         self._target_ids = []
         self._record_ids = []
         self.setWindowTitle("작업 시간과 일정")
@@ -118,7 +117,6 @@ class MoaWindow(QMainWindow):
         self.statusBar().addWidget(self.status_text, 1)
         self.idle_status = QLabel()
         self.statusBar().addPermanentWidget(self.idle_status)
-        self.statusBar().addPermanentWidget(QLabel("  로컬 저장  "))
         self.updater = UpdateController(self)
         geometry = self.preferences.value("geometry")
         if geometry is not None:
@@ -166,14 +164,14 @@ class MoaWindow(QMainWindow):
         help_menu = menu.addMenu("도움말(&H)")
         help_menu.addAction(self.action("사용 안내", self.open_help, "F1"))
         help_menu.addAction(self.action("업데이트 확인…", self.open_updates))
-        help_menu.addAction(self.action("모아 정보", lambda: QMessageBox.about(self, "모아 정보", f"모아 {APP_VERSION}\n자동 작업 시간 기록 · 의뢰와 일정 관리\n\n기록은 매초 이 컴퓨터에 저장됩니다.")))
+        help_menu.addAction(self.action("모아 정보", lambda: QMessageBox.about(self, "모아 정보", f"모아 {APP_VERSION}\n자동 작업 시간 기록 · 의뢰와 일정 관리")))
 
     def build_toolbar(self):
         toolbar = QToolBar("기록 도구", self)
         toolbar.setMovable(False)
         toolbar.setFloatable(False)
         self.addToolBar(toolbar)
-        self.tracking_button = button("자동 추적 시작", self.toggle_tracking, "Ctrl+R · 등록한 프로그램이나 URL이 활성화되면 자동으로 기록")
+        self.tracking_button = button("자동 추적 시작", self.toggle_tracking, "Ctrl+R")
         self.tracking_button.setObjectName("trackingButton")
         self.tracking_button.setAccessibleName("자동 추적 시작 또는 일시정지")
         toolbar.addWidget(self.tracking_button)
@@ -183,7 +181,6 @@ class MoaWindow(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
-        toolbar.addWidget(button("새 일정…", self.add_assignment, "Ctrl+N"))
 
     def build_body(self):
         root = QWidget()
@@ -199,9 +196,7 @@ class MoaWindow(QMainWindow):
         brand = heading("모아", 18)
         brand.setContentsMargins(10, 0, 0, 0)
         side.addWidget(brand)
-        subtitle = muted_label("작업 시간 · 일정")
-        subtitle.setContentsMargins(10, 0, 0, 18)
-        side.addWidget(subtitle)
+        side.addSpacing(18)
         self.nav = QListWidget()
         self.nav.setObjectName("navigation")
         self.nav.setAccessibleName("화면 선택")
@@ -238,7 +233,6 @@ class MoaWindow(QMainWindow):
         row.addWidget(heading(title, 16))
         sample = QLabel("샘플 기록 포함")
         sample.setStyleSheet("color: #8b7046; font-size: 11px;")
-        sample.setToolTip("기존 샘플 기록이 포함되어 있습니다. 설정에서 샘플만 삭제할 수 있습니다.")
         row.addWidget(sample)
         row.addStretch()
         layout.addLayout(row)
@@ -274,7 +268,7 @@ class MoaWindow(QMainWindow):
         label = QPushButton()
         label.setMinimumWidth(136)
         label.setObjectName("monthPicker")
-        label.setToolTip("연·월을 지정해 바로 이동 · Ctrl+L")
+        label.setToolTip("Ctrl+L")
         label.setAccessibleName("연·월 바로 이동")
         label.clicked.connect(self.choose_month)
         row.addWidget(previous)
@@ -297,7 +291,6 @@ class MoaWindow(QMainWindow):
         row, self.calendar_month = self.month_controls(content)
         self.filter_button = QToolButton()
         self.filter_button.setText("전체 작업")
-        self.filter_button.setToolTip("달력과 날짜별 기록에 표시할 작업 선택")
         self.filter_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.filter_menu = QMenu(self.filter_button)
         self.filter_button.setMenu(self.filter_menu)
@@ -322,9 +315,6 @@ class MoaWindow(QMainWindow):
         self.calendar_tabs.currentChanged.connect(self.calendar_views.setCurrentIndex)
         content.addWidget(self.calendar_views, 1)
         foot = QHBoxLayout()
-        self.calendar_foot = muted_label("")
-        self.calendar_foot.setWordWrap(False)
-        foot.addWidget(self.calendar_foot)
         foot.addStretch()
         foot.addWidget(button("CSV 내보내기…", self.export_csv))
         content.addLayout(foot)
@@ -371,7 +361,7 @@ class MoaWindow(QMainWindow):
         self.day_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.day_table.setColumnWidth(1, 103)
         layout.addWidget(self.day_table, 1)
-        self.day_empty = muted_label("이 날짜에는 기록이 없습니다.")
+        self.day_empty = muted_label("기록 없음")
         self.day_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.day_empty)
         record_row = QHBoxLayout()
@@ -390,30 +380,36 @@ class MoaWindow(QMainWindow):
         self.live_clock.setFont(QFont("Consolas", 22))
         self.live_clock.setAccessibleName("자동 감지된 현재 기록 구간 시간")
         layout.addWidget(self.live_clock)
-        self.live_caption = muted_label("등록한 프로그램이나 URL을 사용하면 자동으로 기록합니다.")
+        self.live_caption = muted_label("추적 대기")
         layout.addWidget(self.live_caption)
         return panel
 
     def build_stats_page(self):
         page, layout, self.stats_sample = self.page_frame("시간 통계")
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.stats_summary = self.summary_strip(layout)
         row, self.stats_month = self.month_controls(layout)
         row.addWidget(button("CSV 내보내기…", self.export_csv))
-        layout.addWidget(heading("일별 작업 시간", 11))
+        self.stats_chart_heading = heading("일별 작업 시간", 11)
+        layout.addWidget(self.stats_chart_heading)
         self.chart = DailyChart()
         self.chart.date_selected.connect(self.chart_date_selected)
         layout.addWidget(self.chart, 2)
-        layout.addSpacing(9)
-        layout.addWidget(heading("작업별 누적", 11))
+        self.stats_totals_heading = heading("작업별 누적", 11)
+        layout.addWidget(self.stats_totals_heading)
         self.stats_table = QTableWidget()
         prepare_table(self.stats_table, ["작업", "누적 시간", "비중"])
         self.stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.stats_table.setColumnWidth(1, 160)
         self.stats_table.setColumnWidth(2, 95)
-        self.stats_table.setMinimumHeight(185)
+        self.stats_table.setMinimumHeight(160)
         layout.addWidget(self.stats_table, 2)
-        layout.addWidget(muted_label("하루 평균은 기록이 있는 날짜만 계산합니다. 그래프의 날짜를 누르면 해당 기록으로 이동합니다."))
-        return page
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(page)
+        scroll.setAccessibleName("시간 통계")
+        return scroll
 
     def build_targets_page(self):
         page, layout, self.targets_sample = self.page_frame("추적 대상")
@@ -440,9 +436,8 @@ class MoaWindow(QMainWindow):
         self.targets_table.itemSelectionChanged.connect(self.target_selection_changed)
         self.targets_table.itemDoubleClicked.connect(lambda item: self.edit_target() if item.column() != 0 else None)
         layout.addWidget(self.targets_table, 1)
-        self.targets_empty = muted_label("추적할 작업이 없습니다. ‘추가’를 눌러 프로그램이나 URL을 등록하세요.")
+        self.targets_empty = muted_label("추적 대상 없음")
         layout.addWidget(self.targets_empty)
-        layout.addWidget(muted_label("프로그램은 활성 창 기준으로 기록합니다. 사용을 해제해도 이전 기록은 유지됩니다."))
         connection = QHBoxLayout()
         self.connection_status = muted_label("")
         connection.addWidget(self.connection_status, 1)
@@ -523,7 +518,6 @@ class MoaWindow(QMainWindow):
         self.schedule_page.update_data(self.snapshot, self.year, self.month)
         self.chart.set_data(self.year, self.month, self.snapshot["daily"], self.snapshot["today"])
         self.render_stats_table(month, total)
-        self.calendar_foot.setText(f"자리 비움 기준: {self.snapshot['settings']['idle_minutes']}분")
 
     def render_filter_menu(self):
         self.filter_menu.clear()
@@ -652,10 +646,10 @@ class MoaWindow(QMainWindow):
 
     def update_tracking(self):
         tracker = self.snapshot["tracker"]
-        labels = {"off": "추적 중지", "waiting": "자동 추적 대기 · 등록한 작업을 사용하세요", "recording": "자동 기록 중", "away": "자리 비움 · 복귀하면 자동 재개", "error": "감지 오류 · 앱을 다시 실행하세요"}
+        labels = {"off": "추적 중지", "waiting": "추적 대기", "recording": "자동 기록 중", "away": "자리 비움", "error": "감지 오류"}
         status = labels.get(tracker["status"], "추적 중지")
         if tracker["enabled"] and not any(not target["archived"] for target in self.snapshot["targets"]):
-            status = "추적 대상을 추가하면 자동 기록을 시작합니다"
+            status = "추적 대상 없음"
         active = self.target_map().get(tracker["active"], {}).get("name")
         self.tracking_status.setText(status + (f" · {active}" if active else ""))
         label = "추적 일시정지" if tracker["enabled"] else "자동 추적 시작"
@@ -670,7 +664,7 @@ class MoaWindow(QMainWindow):
         self.idle_status.setText(f"자리 비움 {self.snapshot['settings']['idle_minutes']}분   ")
         elapsed = self.snapshot["now"] - tracker["session_start"] if tracker["status"] == "recording" and tracker["session_start"] else 0
         self.live_clock.setText(format_clock(elapsed))
-        self.live_caption.setText("자리 비움 · 복귀 후 자동으로 이어집니다." if tracker["status"] == "away" else "현재 작업: " + active if active else "등록한 프로그램이나 URL을 사용하면 자동으로 기록합니다." if tracker["enabled"] else "자동 추적이 일시정지되어 있습니다.")
+        self.live_caption.setText("자리 비움" if tracker["status"] == "away" else active or status)
         connected = tracker["browser_connected"]
         self.connection_status.setText("URL 감지: 브라우저 연결됨" if connected else "URL 감지: 브라우저 확장 연결 필요")
         today_total = self.snapshot["daily"].get(self.snapshot["today"], {}).get("total", 0)
@@ -811,9 +805,6 @@ class MoaWindow(QMainWindow):
         if not self._closing and self.preferences.value("close_to_tray", True, type=bool) and self.tray.isVisible():
             self.hide()
             event.ignore()
-            if not self._tray_notice:
-                self.tray.showMessage("모아", "알림 영역에서 계속 실행됩니다. 완전히 종료하려면 모아 메뉴의 ‘종료’를 선택하세요.", QSystemTrayIcon.MessageIcon.Information, 4000)
-                self._tray_notice = True
             return
         event.accept()
         QApplication.quit()

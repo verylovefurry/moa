@@ -4,17 +4,18 @@ from __future__ import annotations
 import calendar
 from datetime import date, datetime
 
-from PySide6.QtCore import Qt, QRect, QRectF, Signal
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QHeaderView, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QStackedWidget, QStyledItemDelegate, QStyle, QTabBar,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QFormLayout, QFrame, QHeaderView, QHBoxLayout,
+    QLabel, QLayout, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
+    QSizePolicy, QSplitter, QStackedWidget, QStyledItemDelegate, QStyle,
+    QTabBar, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from desktop_dialogs import AssignmentDialog, muted_label
 from desktop_widgets import RecordDelegate, prepare_table
-from schedules import STATUSES, STATUS_LABELS, STATUS_COLORS, fee_text
+from schedules import STATUSES, STATUS_LABELS, STATUS_COLORS, assignment_period, fee_text
 from tracker import KST
 
 SCHEDULE_ROLE = Qt.ItemDataRole.UserRole + 20
@@ -89,28 +90,39 @@ class TimelineDelegate(QStyledItemDelegate):
             if day.isoformat() == self.today:
                 painter.setPen(QPen(QColor("#a5b6aa"), 1))
                 painter.drawLine(int(x + step / 2), rect.top(), int(x + step / 2), rect.bottom())
-        start = date.fromisoformat(item["start_date"])
-        end = date.fromisoformat(item["due_date"]) if item["due_date"] else date(self.year, self.month, count)
-        if not item["due_date"] and item.get("completed_at"):
-            end = max(start, datetime.fromtimestamp(item["completed_at"], KST).date())
+        start, end = assignment_period(item)
         left = max(0, (start - first).days)
         right = min(count, (end - first).days + 1)
         if right > left:
-            bar = QRectF(rect.left() + left * step + 2, rect.top() + 18, max(3, (right - left) * step - 4), 29)
             color = QColor(STATUS_COLORS[item["status"]])
-            fill = QColor(color)
-            fill.setAlpha(62 if item["status"] != "completed" else 40)
-            painter.setBrush(fill)
-            painter.setPen(QPen(color, 1, Qt.PenStyle.DashLine if not item["due_date"] and not item.get("completed_at") else Qt.PenStyle.SolidLine))
-            painter.drawRoundedRect(bar, 3, 3)
-            painter.fillRect(QRectF(bar.left(), bar.top() + 1, min(3, bar.width()), bar.height() - 2), color)
-            font = QFont(option.font)
-            font.setPointSizeF(8)
-            painter.setFont(font)
-            painter.setPen(QColor("#35473c"))
-            label = f"{start.month}.{start.day} — {end.month}.{end.day}" if item["due_date"] else "마감 없음" if not item.get("completed_at") else "완료"
-            if bar.width() > 60:
-                painter.drawText(bar.adjusted(8, 0, -5, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, painter.fontMetrics().elidedText(label, Qt.TextElideMode.ElideRight, int(bar.width() - 13)))
+            if not item["due_date"]:
+                x = rect.left() + (left + .5) * step
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                painter.drawEllipse(QPointF(x, rect.center().y()), 4.5, 4.5)
+                font = QFont(option.font)
+                font.setPointSizeF(8)
+                painter.setFont(font)
+                painter.setPen(QColor("#35473c"))
+                label = f"{start.month}.{start.day}"
+                width = painter.fontMetrics().horizontalAdvance(label) + 2
+                label_x = x + 10 if rect.right() - x >= width + 12 else x - width - 10
+                painter.drawText(QRectF(label_x, rect.top(), width, rect.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, label)
+            else:
+                bar = QRectF(rect.left() + left * step + 2, rect.top() + 18, max(3, (right - left) * step - 4), 29)
+                fill = QColor(color)
+                fill.setAlpha(62 if item["status"] != "completed" else 40)
+                painter.setBrush(fill)
+                painter.setPen(QPen(color, 1))
+                painter.drawRoundedRect(bar, 3, 3)
+                painter.fillRect(QRectF(bar.left(), bar.top() + 1, min(3, bar.width()), bar.height() - 2), color)
+                font = QFont(option.font)
+                font.setPointSizeF(8)
+                painter.setFont(font)
+                painter.setPen(QColor("#35473c"))
+                label = f"{start.month}.{start.day} — {end.month}.{end.day}"
+                if bar.width() > 60:
+                    painter.drawText(bar.adjusted(8, 0, -5, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, painter.fontMetrics().elidedText(label, Qt.TextElideMode.ElideRight, int(bar.width() - 13)))
         painter.setPen(QColor("#e7ece8"))
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
         painter.restore()
@@ -137,7 +149,7 @@ class SchedulePage(QWidget):
         heading.addWidget(title_label("일정 관리", 16))
         heading.addStretch()
         self.add_button = QPushButton("새 일정…")
-        self.add_button.setToolTip("새 의뢰·할 일 · Ctrl+N")
+        self.add_button.setToolTip("Ctrl+N")
         self.add_button.clicked.connect(self.add_assignment)
         heading.addWidget(self.add_button)
         layout.addLayout(heading)
@@ -149,7 +161,8 @@ class SchedulePage(QWidget):
         toolbar.addWidget(previous)
         self.month_button = QPushButton()
         self.month_button.setMinimumWidth(136)
-        self.month_button.setToolTip("연·월을 지정해 바로 이동")
+        self.month_button.setAccessibleName("연·월 바로 이동")
+        self.month_button.setToolTip("Ctrl+L")
         self.month_button.clicked.connect(lambda: self.choose_month_requested.emit())
         toolbar.addWidget(self.month_button)
         following = QPushButton("›")
@@ -206,31 +219,91 @@ class SchedulePage(QWidget):
         self.list.itemSelectionChanged.connect(lambda: self.select_row(self.list))
         self.list.itemDoubleClicked.connect(lambda item: self.edit_assignment() if item.column() != 5 else None)
         self.views.addWidget(self.list)
-        self.tabs.currentChanged.connect(self.views.setCurrentIndex)
-        layout.addWidget(self.views, 1)
-        self.empty = muted_label("이 달에는 등록된 일정이 없습니다. ‘새 일정’을 눌러 의뢰나 할 일을 추가하세요.")
+        self.empty = muted_label("이달 일정 없음")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.empty)
+        self.views.addWidget(self.empty)
+        self.tabs.currentChanged.connect(lambda index: self.views.setCurrentIndex(index if self.ids else 2))
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.splitter.setChildrenCollapsible(False)
+        self.views.setMinimumHeight(170)
+        self.splitter.addWidget(self.views)
+        self.detail_panel = QWidget()
+        self.detail_panel.setMinimumHeight(240)
+        detail = QVBoxLayout(self.detail_panel)
+        detail.setContentsMargins(0, 6, 0, 0)
+        detail.setSpacing(10)
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Plain)
+        line.setProperty("divider", True)
+        detail.addWidget(line)
         row = QHBoxLayout()
-        row.addWidget(muted_label("점선 막대는 마감일이 없는 일정입니다. 상태는 목록에서 바로 변경할 수 있습니다."), 1)
+        row.setSpacing(10)
+        self.detail_title = title_label("", 11)
+        self.detail_title.setTextFormat(Qt.TextFormat.PlainText)
+        self.detail_title.setWordWrap(True)
+        self.detail_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.detail_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        row.addWidget(self.detail_title, 1)
+        self.detail_status = QLabel()
+        row.addWidget(self.detail_status)
         self.edit_button = QPushButton("편집…")
         self.edit_button.clicked.connect(self.edit_assignment)
         self.delete_button = QPushButton("삭제…")
         self.delete_button.clicked.connect(self.delete_assignment)
         row.addWidget(self.edit_button)
         row.addWidget(self.delete_button)
-        layout.addLayout(row)
-        self.detail_title = title_label("일정을 선택하면 상세 정보가 표시됩니다.", 11)
-        self.detail_title.setWordWrap(True)
-        self.detail_title.setMaximumHeight(48)
-        self.detail_meta = muted_label("")
-        self.detail_note = muted_label("")
-        self.detail_note.setMaximumHeight(48)
-        self.detail_history = muted_label("")
-        for label in (self.detail_title, self.detail_meta, self.detail_note, self.detail_history):
-            label.setTextFormat(Qt.TextFormat.PlainText)
-            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            layout.addWidget(label)
+        detail.addLayout(row)
+        self.detail_tabs = QTabWidget()
+        info = QWidget()
+        info_layout = QHBoxLayout(info)
+        info_layout.setContentsMargins(12, 12, 12, 12)
+        info_layout.setSpacing(24)
+        info_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        fields = QWidget()
+        form = QFormLayout(fields)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(10)
+        self.detail_fields = {}
+        for key, caption in (("client", "의뢰인"), ("start_date", "시작일"), ("due_date", "마감일"), ("fee", "보수")):
+            value = QLabel()
+            value.setWordWrap(True)
+            value.setTextFormat(Qt.TextFormat.PlainText)
+            value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            value.setAccessibleName(caption)
+            form.addRow(muted_label(caption), value)
+            self.detail_fields[key] = value
+        info_layout.addWidget(fields, 2, Qt.AlignmentFlag.AlignTop)
+        note_column = QVBoxLayout()
+        note_column.setSpacing(6)
+        note_column.addWidget(muted_label("메모"))
+        self.detail_note = QPlainTextEdit()
+        self.detail_note.setReadOnly(True)
+        self.detail_note.setAccessibleName("일정 메모")
+        self.detail_note.setMinimumHeight(70)
+        note_column.addWidget(self.detail_note, 1)
+        info_layout.addLayout(note_column, 3)
+        info_scroll = QScrollArea()
+        info_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        info_scroll.setWidgetResizable(True)
+        info_scroll.setWidget(info)
+        self.detail_tabs.addTab(info_scroll, "상세 정보")
+        self.detail_history = QTableWidget()
+        prepare_table(self.detail_history, ["변경 일시", "변경 내용"])
+        self.detail_history.setAccessibleName("일정 상태 변경 이력")
+        self.detail_history.setColumnWidth(0, 154)
+        self.detail_history.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.detail_history.verticalHeader().setDefaultSectionSize(32)
+        self.detail_tabs.addTab(self.detail_history, "상태 이력")
+        detail.addWidget(self.detail_tabs, 1)
+        self.splitter.addWidget(self.detail_panel)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
+        self.splitter.setSizes([340, 260])
+        layout.addWidget(self.splitter, 1)
         self.update_data(self.snapshot, self.year, self.month, force=True)
 
     def move_month(self, amount):
@@ -243,15 +316,13 @@ class SchedulePage(QWidget):
         self.month_requested.emit(today.year, today.month)
 
     def visible_assignments(self):
-        first = date(self.year, self.month, 1).isoformat()
-        last = date(self.year, self.month, calendar.monthrange(self.year, self.month)[1]).isoformat()
+        first = date(self.year, self.month, 1)
+        last = date(self.year, self.month, calendar.monthrange(self.year, self.month)[1])
         status_filter = self.status_filter.currentData()
         result = []
         for item in self.snapshot["assignments"]:
-            end = item["due_date"]
-            if not end and item.get("completed_at"):
-                end = max(item["start_date"], datetime.fromtimestamp(item["completed_at"], KST).date().isoformat())
-            if item["start_date"] > last or (end and end < first):
+            start, end = assignment_period(item)
+            if start > last or end < first:
                 continue
             if status_filter == "open" and item["status"] == "completed":
                 continue
@@ -289,7 +360,7 @@ class SchedulePage(QWidget):
             period = QTableWidgetItem()
             period.setData(SCHEDULE_ROLE, item)
             period.setToolTip(tooltip)
-            period.setData(Qt.ItemDataRole.AccessibleTextRole, f"{item['start_date']}부터 {deadline}까지")
+            period.setData(Qt.ItemDataRole.AccessibleTextRole, f"{item['start_date']}부터 {deadline}까지" if item["due_date"] else f"시작일 {item['start_date']} · 마감 없음")
             self.timeline.setItem(row, 3, period)
             for column, text in enumerate((item["title"], item["client"] or "개인 할 일", item["start_date"], deadline, fee_text(item["fee"]), "")):
                 entry = QTableWidgetItem(text)
@@ -314,7 +385,7 @@ class SchedulePage(QWidget):
         for table in (self.timeline, self.list):
             table.blockSignals(False)
         self.count_label.setText(f"이달 일정 {len(values)}개 · 미완료 {sum(item['status'] != 'completed' for item in values)}개")
-        self.empty.setVisible(not values)
+        self.views.setCurrentIndex(self.tabs.currentIndex() if values else 2)
         self.edit_button.setEnabled(bool(values))
         self.delete_button.setEnabled(bool(values))
         self.update_detail()
@@ -336,28 +407,32 @@ class SchedulePage(QWidget):
         item = self.selected_assignment()
         self.edit_button.setEnabled(item is not None)
         self.delete_button.setEnabled(item is not None)
+        self.detail_panel.setVisible(item is not None)
         if not item:
-            self.detail_title.setText("일정을 선택하면 상세 정보가 표시됩니다.")
-            for label in (self.detail_meta, self.detail_note, self.detail_history):
-                label.clear()
-                label.hide()
+            self.detail_title.clear()
+            self.detail_status.clear()
+            for value in self.detail_fields.values():
+                value.clear()
+            self.detail_note.clear()
+            self.detail_history.setRowCount(0)
             return
         self.detail_title.setText(item["title"])
         self.detail_title.setToolTip(item["title"])
-        self.detail_meta.show()
-        self.detail_meta.setText(f"의뢰인: {item['client'] or '개인 할 일'}    시작: {item['start_date']}    마감: {item['due_date'] or '없음'}    보수: {fee_text(item['fee'])}")
-        self.detail_note.setVisible(bool(item["note"]))
-        self.detail_note.setText(item["note"][:300] + ("…" if len(item["note"]) > 300 else ""))
-        self.detail_note.setToolTip(item["note"])
+        self.detail_status.setText(STATUS_LABELS[item["status"]])
+        values = {"client": item["client"] or "개인 할 일", "start_date": item["start_date"],
+                  "due_date": item["due_date"] or "없음", "fee": fee_text(item["fee"]) if item["fee"] is not None else "없음"}
+        for key, value in values.items():
+            self.detail_fields[key].setText(value)
+        note = item["note"] or "없음"
+        if self.detail_note.toPlainText() != note:
+            self.detail_note.setPlainText(note)
         history = [entry for entry in self.snapshot["assignment_history"] if entry["assignment_id"] == item["id"]]
-        texts = []
-        for entry in history:
-            stamp = datetime.fromtimestamp(entry["changed_at"], KST).strftime("%m.%d %H:%M")
+        self.detail_history.setRowCount(len(history))
+        for row, entry in enumerate(reversed(history)):
+            stamp = datetime.fromtimestamp(entry["changed_at"], KST).strftime("%Y-%m-%d %H:%M")
             change = (STATUS_LABELS[entry["from_status"]] + " → " if entry["from_status"] else "등록: ") + STATUS_LABELS[entry["to_status"]]
-            texts.append(f"{stamp} {change}")
-        self.detail_history.setVisible(bool(texts))
-        self.detail_history.setText("상태 이력  ·  " + "  /  ".join(texts[-3:]))
-        self.detail_history.setToolTip("\n".join(texts))
+            self.detail_history.setItem(row, 0, QTableWidgetItem(stamp))
+            self.detail_history.setItem(row, 1, QTableWidgetItem(change))
 
     def add_assignment(self):
         dialog = AssignmentDialog(self, self.backend)

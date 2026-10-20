@@ -131,3 +131,8 @@ def schedule_state(db):
 
 def fee_text(value):
     return "—" if value is None else f"{value:,}원"
+
+
+def assignment_period(item):
+    start = date.fromisoformat(item["start_date"])
+    return start, date.fromisoformat(item["due_date"]) if item["due_date"] else start

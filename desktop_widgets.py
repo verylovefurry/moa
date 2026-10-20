@@ -240,7 +240,7 @@ class DailyChart(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(230)
+        self.setMinimumHeight(200)
         self.setAccessibleName("일별 작업 시간 막대 그래프")
         self.values = []
         self.today = ""
@@ -285,7 +285,7 @@ class DailyChart(QWidget):
     def mouseMoveEvent(self, event):
         for rect, day, seconds in self._bars:
             if rect.contains(event.position()):
-                self.setToolTip(f"{day} · {format_duration(seconds)}\n클릭하여 해당 날짜의 기록 보기")
+                self.setToolTip(f"{day} · {format_duration(seconds)}")
                 return
 
     def mousePressEvent(self, event):

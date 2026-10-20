@@ -8,12 +8,13 @@ from unittest.mock import patch, Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QDate, QEvent, QTime
+from PySide6.QtCore import QCoreApplication, QDate, QEvent, QPoint, QTime
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog
 from desktop import MoaWindow, configure_application, parse_arguments
 from desktop_backend import DesktopBackend, migrate_legacy_database
 from desktop_dialogs import AssignmentDialog, MonthDialog, SettingsDialog, TargetDialog
-from schedules import STATUSES
+from schedules import STATUSES, save_assignment
 from tracker import Store
 from tests.fixtures import seed_test_store
 from desktop_update import UpdateDialog
@@ -25,6 +26,11 @@ class DesktopTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+        if cls.app.platformName() == "offscreen" and os.name == "nt":
+            fonts=Path(os.environ.get("WINDIR","C:/Windows"))/"Fonts"
+            for name in ("malgun.ttf","malgunbd.ttf","segoeui.ttf","consola.ttf"):
+                if (fonts/name).is_file():
+                    QFontDatabase.addApplicationFont(str(fonts/name))
         configure_application(cls.app)
 
     def setUp(self):
@@ -151,6 +157,76 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(len(self.backend.state()["assignment_history"]), 6)
         self.window.set_month(2026, 11)
         self.assertEqual(page.timeline.rowCount(), 1)
+
+    def test_no_deadline_schedule_only_appears_in_its_start_month(self):
+        from datetime import datetime
+        from tracker import KST
+        completed=datetime(2026,11,2,tzinfo=KST).timestamp()
+        cases=(
+            {"title":"지난달 미완료", "start_date":"2026-09-30"},
+            {"title":"지난달 시작 후 완료", "start_date":"2026-09-30", "status":"completed"},
+            {"title":"이달 첫날", "start_date":"2026-10-01"},
+            {"title":"이달 마지막날", "start_date":"2026-10-31"},
+            {"title":"다음달 첫날", "start_date":"2026-11-01"},
+            {"title":"마감이 있는 이전달 의뢰", "start_date":"2026-09-30", "due_date":"2026-10-01"},
+        )
+        for payload in cases:
+            save_assignment(self.backend.store.db,payload,now=completed)
+        self.window.refresh(force=True)
+        page=self.window.schedule_page
+        expected={
+            9:{"지난달 미완료", "지난달 시작 후 완료", "마감이 있는 이전달 의뢰"},
+            10:{"이달 첫날", "이달 마지막날", "마감이 있는 이전달 의뢰"},
+            11:{"다음달 첫날"},
+        }
+        for month,titles in expected.items():
+            self.window.set_month(2026,month)
+            self.assertEqual({item["title"] for item in page.visible_assignments()},titles)
+            self.assertEqual(page.timeline.rowCount(),len(titles))
+            self.assertEqual(page.list.rowCount(),len(titles))
+
+    def test_schedule_details_show_full_notes_fields_and_status_history(self):
+        note=("전달 파일: 원본과 미리보기\n"+"상세 작업 범위와 요청 사항. "*60).strip()
+        self.backend.command("assignments", {"title":"표지 작업", "client":"의뢰인", "start_date":"2026-10-01", "due_date":"2026-10-31", "fee":0, "note":note})
+        self.window.refresh(force=True)
+        self.window.set_month(2026,10)
+        self.window.nav.setCurrentRow(1)
+        page=self.window.schedule_page
+        assignment_id=page.selected_id
+        for status,_ in STATUSES:
+            page.change_status(assignment_id,status)
+        self.assertEqual(page.detail_title.text(),"표지 작업")
+        self.assertEqual(page.detail_status.text(),"최종 완료")
+        self.assertEqual({key:label.text() for key,label in page.detail_fields.items()},
+                         {"client":"의뢰인", "start_date":"2026-10-01", "due_date":"2026-10-31", "fee":"0원"})
+        self.assertEqual(page.detail_note.toPlainText(),note)
+        self.assertTrue(page.detail_note.isReadOnly())
+        self.assertEqual(page.detail_history.rowCount(),6)
+        self.assertEqual(page.detail_history.item(0,1).text(),"보수 수령 → 최종 완료")
+        self.assertEqual(page.detail_history.item(5,1).text(),"등록: 미착수")
+        self.window.set_month(2026,11)
+        self.assertTrue(page.detail_panel.isHidden())
+        self.assertEqual(page.detail_note.toPlainText(),"")
+        self.assertEqual(page.detail_history.rowCount(),0)
+
+    def test_stats_remain_separate_and_scrollable_when_window_shrinks(self):
+        self.window.nav.setCurrentRow(2)
+        scroll=self.window.pages.widget(2)
+        for width,height in ((1270,820),(1050,720)):
+            self.window.resize(width,height)
+            self.app.processEvents()
+            chart=self.window.chart
+            totals=self.window.stats_totals_heading
+            table=self.window.stats_table
+            self.assertGreaterEqual(chart.height(),chart.minimumHeight())
+            self.assertGreater(totals.y(),chart.geometry().bottom())
+            self.assertGreater(table.y(),totals.geometry().bottom())
+            self.assertGreaterEqual(table.height(),table.minimumHeight())
+            scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+            self.app.processEvents()
+            location=totals.mapTo(scroll.viewport(),QPoint(0,0))
+            self.assertGreaterEqual(location.y(),0)
+            self.assertLess(location.y()+totals.height(),scroll.viewport().height())
 
     def test_settings_dialog_persists_tracking_settings(self):
         dialog = SettingsDialog(self.window, self.backend, self.window.preferences)
