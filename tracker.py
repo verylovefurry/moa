@@ -15,10 +15,12 @@ import uuid
 from urllib.parse import urlsplit
 
 from schedules import ensure_schedule_schema, schedule_state
+from recovery import ensure_recovery_schema
 
 KST = timezone(timedelta(hours=9))
 COLORS = ["#9b87c4", "#7798bd", "#d4a36b", "#78a38c", "#cf8a8a", "#84939d"]
 BROWSERS = {"chrome.exe", "msedge.exe", "brave.exe", "vivaldi.exe", "arc.exe"}
+SWITCH_GRACE_MINUTES = (0, 1, 3, 5, 10, 15, 30)
 
 
 def key() -> str:
@@ -145,12 +147,15 @@ class Store:
             CREATE INDEX IF NOT EXISTS sessions_time ON sessions(start, end);
         """)
         ensure_schedule_schema(self.db)
+        ensure_recovery_schema(self.db)
         fresh = not self.db.execute("SELECT 1 FROM settings WHERE key='initialized'").fetchone()
         if fresh:
             self.set_setting("idle_minutes", 5)
             self.set_setting("daily_goal", 6)
             self.set_setting("extension_token", secrets.token_hex(3).upper())
             self.set_setting("initialized", True)
+        self.db.execute("INSERT OR IGNORE INTO settings VALUES ('switch_grace_minutes','5')")
+        self.db.commit()
         self.remove_legacy_defaults()
 
     def settings(self):
@@ -164,7 +169,10 @@ class Store:
         return [dict(r) for r in self.db.execute("SELECT * FROM targets ORDER BY rowid")]
 
     def sessions(self):
-        return [dict(r) for r in self.db.execute("SELECT * FROM sessions ORDER BY start")]
+        return [dict(r) for r in self.db.execute("""SELECT s.*,
+            CASE WHEN g.session_id IS NULL THEN 0
+                 ELSE MAX(0,MIN(s.end,g.restored_end)-g.original_end) END AS recovered_seconds
+            FROM sessions s LEFT JOIN gap_recoveries g ON g.session_id=s.id ORDER BY s.start""")]
 
     def remove_legacy_defaults(self):
         """Archive unchanged built-ins once; preserve their history and user edits."""
@@ -217,6 +225,7 @@ class Tracker:
         self.active = None
         self.session_id = None
         self.session_start = None
+        self.focus_lost_at = None
         self.run_start = clock()
         self.last_tick = clock()
         self.status = "off"
@@ -232,6 +241,7 @@ class Tracker:
         self.session_id = None
         self.session_start = None
         self.active = None
+        self.focus_lost_at = None
 
     def set_enabled(self, enabled):
         with self.lock:
@@ -286,6 +296,7 @@ class Tracker:
                     self.session_id = None
                     self.session_start = None
                     self.active = None
+                    self.focus_lost_at = None
                     self.idle_id = key()
                     self.store.db.execute("INSERT INTO excluded VALUES (?,?,?)", (self.idle_id, cutoff, now))
                 else:
@@ -294,11 +305,22 @@ class Tracker:
                 self.status = "away"
                 return
             self.close_idle(now - idle)
+            grace = settings["switch_grace_minutes"] * 60
+            if self.focus_lost_at is not None and now >= self.focus_lost_at + grace:
+                self.stop_segment(self.focus_lost_at + grace)
             target = self.match_target(sample["exe"], now)
             if not target:
-                self.stop_segment(now)
-                self.status = "waiting"
+                eligible = self.active and any(t["id"] == self.active and t["enabled"] and not t["archived"] for t in self.store.targets())
+                if eligible and grace:
+                    if self.focus_lost_at is None:
+                        self.focus_lost_at = now
+                    self.store.finish(self.session_id, now)
+                    self.status = "continuing"
+                else:
+                    self.stop_segment(now)
+                    self.status = "waiting"
                 return
+            self.focus_lost_at = None
             if self.active != target["id"]:
                 self.stop_segment(now)
                 self.active = target["id"]
@@ -330,6 +352,7 @@ class Tracker:
                     "enabled": self.enabled, "active": self.active,
                     "status": self.status, "session_start": self.session_start,
                     "exe": self.last_exe, "idle_seconds": self.last_idle,
+                    "continuation_remaining": max(0, self.focus_lost_at + self.store.settings()["switch_grace_minutes"] * 60 - self.clock()) if self.focus_lost_at is not None else 0,
                     "windows": self.activity.supported, "error": self.error,
                     "browser_connected": any(self.clock() - e["seen"] < 40 for e in self.browser_events.values()),
                 },

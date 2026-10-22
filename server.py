@@ -13,7 +13,7 @@ import threading
 from urllib.parse import urlsplit
 import webbrowser
 
-from tracker import COLORS, KST, Store, Tracker, key
+from tracker import COLORS, KST, SWITCH_GRACE_MINUTES, Store, Tracker, key
 from schedules import save_assignment, change_assignment_status, archive_assignment
 
 ROOT = Path(__file__).resolve().parent
@@ -177,8 +177,12 @@ def make_handler(tracker, port):
                         goal = data.get("daily_goal")
                         if idle not in (1, 3, 5, 10, 15, 30) or goal not in (2, 4, 6, 8, 10, 12):
                             raise ValueError("설정값을 확인해주세요.")
+                        grace = data.get("switch_grace_minutes", tracker.store.settings()["switch_grace_minutes"])
+                        if type(grace) is not int or grace not in SWITCH_GRACE_MINUTES:
+                            raise ValueError("창 전환 후 이어 기록 시간을 확인해주세요.")
                         tracker.store.set_setting("idle_minutes", idle)
                         tracker.store.set_setting("daily_goal", goal)
+                        tracker.store.set_setting("switch_grace_minutes", grace)
                         tracker.tick()
                     elif path == "/api/assignments":
                         save_assignment(tracker.store.db, data)

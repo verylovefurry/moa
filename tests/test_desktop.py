@@ -232,10 +232,12 @@ class DesktopTests(unittest.TestCase):
         dialog = SettingsDialog(self.window, self.backend, self.window.preferences)
         dialog.idle.setCurrentIndex(dialog.idle.findData(10))
         dialog.goal.setCurrentIndex(dialog.goal.findData(8))
+        dialog.switch_grace.setCurrentIndex(dialog.switch_grace.findData(10))
         dialog.save()
         settings = self.backend.state()["settings"]
         self.assertEqual(settings["idle_minutes"], 10)
         self.assertEqual(settings["daily_goal"], 8)
+        self.assertEqual(settings["switch_grace_minutes"], 10)
         self.assertTrue(self.window.preferences.value("auto_updates", type=bool))
         dialog.deleteLater()
 

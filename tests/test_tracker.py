@@ -29,6 +29,7 @@ class TrackingTests(unittest.TestCase):
         self.tracker = Tracker(self.store, FakeActivity(), clock=lambda: self.now)
         self.tracker.enabled = True
         self.store.set_setting("idle_minutes", 1)
+        self.store.set_setting("switch_grace_minutes", 0)
 
     def tearDown(self):
         self.store.db.close()
@@ -155,6 +156,92 @@ class TrackingTests(unittest.TestCase):
         excluded = self.store.db.execute("SELECT * FROM excluded").fetchone()
         self.assertEqual(excluded["end"], 1090)
 
+    def test_research_window_and_return_keep_one_continuous_session(self):
+        self.store.set_setting("switch_grace_minutes",5)
+        self.advance(1000,1010)
+        session_id=self.tracker.session_id
+        self.advance(1011,1040,"chrome.exe")
+        self.assertEqual(self.tracker.status,"continuing")
+        self.assertEqual(self.tracker.active,"code")
+        self.assertEqual(self.tracker.state()["tracker"]["continuation_remaining"],271)
+        self.advance(1041,1050)
+        self.assertEqual(self.tracker.session_id,session_id)
+        self.assertEqual(len(self.store.sessions()),1)
+        self.assertEqual(self.total(),50)
+        self.assertEqual(self.tracker.status,"recording")
+
+    def test_continuation_expires_even_with_regular_input_in_other_window(self):
+        self.store.set_setting("switch_grace_minutes",1)
+        self.advance(1000,1010)
+        self.advance(1011,1100,"other.exe")
+        self.assertEqual(self.total(),71)
+        self.assertEqual(self.store.sessions()[0]["end"],1071)
+        self.assertEqual(self.tracker.status,"waiting")
+        self.advance(1101,1105,"other.exe")
+        self.assertEqual(self.total(),71)
+        self.advance(1106,1110)
+        self.assertEqual(self.total(),75)
+        self.assertEqual(len(self.store.sessions()),2)
+
+    def test_other_tracked_target_takes_over_without_double_counting(self):
+        self.store.set_setting("switch_grace_minutes",5)
+        self.advance(1000,1010)
+        self.advance(1011,1020,"other.exe")
+        self.advance(1021,1030,"figma.exe")
+        records=self.store.sessions()
+        self.assertEqual(self.total(),30)
+        self.assertEqual([s["target_id"] for s in records],["code","figma"])
+        self.assertEqual(records[0]["end"],records[1]["start"])
+
+    def test_idle_removes_continued_time_and_untracked_return_does_not_rearm(self):
+        self.store.set_setting("switch_grace_minutes",5)
+        self.advance(1000,1010)
+        self.advance(1011,1070,"other.exe",last_input=1010)
+        self.assertEqual(self.total(),10)
+        self.assertEqual(self.tracker.status,"away")
+        self.tick(1071,"other.exe")
+        self.assertEqual(self.tracker.status,"waiting")
+        self.assertIsNone(self.tracker.active)
+        self.tick(1072)
+        self.assertEqual(self.tracker.session_start,1072)
+
+    def test_suspend_and_explicit_pause_clear_continuation(self):
+        self.store.set_setting("switch_grace_minutes",5)
+        self.advance(1000,1010)
+        self.advance(1011,1020,"other.exe")
+        self.tick(2000,"other.exe")
+        self.assertEqual(self.total(),20)
+        self.assertEqual(self.tracker.status,"waiting")
+        self.tick(2001)
+        self.tick(2002,"other.exe")
+        self.now=2003
+        self.tracker.activity.sample=lambda:{"exe":"other.exe","idle":0}
+        self.tracker.set_enabled(False)
+        self.assertIsNone(self.tracker.focus_lost_at)
+        self.tracker.set_enabled(True)
+        self.assertEqual(self.tracker.status,"waiting")
+
+    def test_disabling_target_during_continuation_stops_it(self):
+        self.store.set_setting("switch_grace_minutes",5)
+        self.advance(1000,1010)
+        self.advance(1011,1020,"other.exe")
+        self.store.db.execute("UPDATE targets SET enabled=0 WHERE id='code'")
+        self.store.db.commit()
+        self.tick(1021,"other.exe")
+        self.assertIsNone(self.tracker.active)
+        self.assertEqual(self.tracker.status,"waiting")
+        self.advance(1022,1030,"other.exe")
+        self.assertEqual(self.total(),21)
+
+    def test_return_after_deadline_does_not_bridge_unobserved_remainder(self):
+        self.store.set_setting("switch_grace_minutes",1)
+        self.advance(1000,1010)
+        self.advance(1011,1070,"other.exe")
+        self.tick(1073)
+        records=self.store.sessions()
+        self.assertEqual(records[0]["end"],1071)
+        self.assertEqual(records[1]["start"],1073)
+
 
 class MatchingTests(unittest.TestCase):
     def test_url_boundary(self):
@@ -225,6 +312,17 @@ class APITests(unittest.TestCase):
             with self.assertRaises(HTTPError) as error:
                 self.call(endpoint, {"target_id":"code", "minutes":60})
             self.assertEqual(error.exception.code, 410)
+
+    def test_grace_settings_validate_before_writing_and_keep_legacy_clients(self):
+        self.call("settings",{"idle_minutes":5,"daily_goal":6,"switch_grace_minutes":10})
+        self.call("settings",{"idle_minutes":3,"daily_goal":8})
+        before=self.store.settings()
+        self.assertEqual(before["switch_grace_minutes"],10)
+        for value in (True,-1,2,"5",None):
+            with self.assertRaises(HTTPError) as error:
+                self.call("settings",{"idle_minutes":1,"daily_goal":2,"switch_grace_minutes":value})
+            self.assertEqual(error.exception.code,400)
+            self.assertEqual(self.store.settings(),before)
 
 
 if __name__ == "__main__":

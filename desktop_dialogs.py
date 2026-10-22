@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from desktop_widgets import color_icon
-from tracker import COLORS
+from tracker import COLORS, SWITCH_GRACE_MINUTES
 from schedules import STATUSES
 
 
@@ -251,6 +251,10 @@ class SettingsDialog(FormDialog):
         for value in (1, 3, 5, 10, 15, 30):
             self.idle.addItem(f"{value}분", value)
         self.idle.setCurrentIndex(self.idle.findData(snapshot["settings"]["idle_minutes"]))
+        self.switch_grace = QComboBox()
+        for value in SWITCH_GRACE_MINUTES:
+            self.switch_grace.addItem(f"{value}분" if value else "즉시 중지", value)
+        self.switch_grace.setCurrentIndex(self.switch_grace.findData(snapshot["settings"]["switch_grace_minutes"]))
         self.goal = QComboBox()
         for value in (2, 4, 6, 8, 10, 12):
             self.goal.addItem(f"{value}시간", value)
@@ -258,6 +262,7 @@ class SettingsDialog(FormDialog):
         self.to_tray = QCheckBox("창을 닫으면 알림 영역에서 계속 실행")
         self.to_tray.setChecked(preferences.value("close_to_tray", True, type=bool))
         self.form.addRow("자리 비움 기준(&I)", self.idle)
+        self.form.addRow("창 전환 후 이어 기록(&W)", self.switch_grace)
         self.form.addRow("하루 작업 목표(&G)", self.goal)
         self.form.addRow("닫기 동작", self.to_tray)
         self.start_with_windows = QCheckBox("Windows 로그인 시 알림 영역에서 자동 실행")
@@ -297,7 +302,7 @@ class SettingsDialog(FormDialog):
 
     def save(self):
         try:
-            self.backend.command("settings", {"idle_minutes": self.idle.currentData(), "daily_goal": self.goal.currentData()})
+            self.backend.command("settings", {"idle_minutes": self.idle.currentData(), "daily_goal": self.goal.currentData(), "switch_grace_minutes": self.switch_grace.currentData()})
         except (ValueError, RuntimeError) as exc:
             self.show_error(exc)
             return

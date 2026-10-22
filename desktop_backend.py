@@ -65,7 +65,7 @@ def csv_safe(value) -> str:
 
 
 class DesktopBackend:
-    def __init__(self, data_directory=None, port=3847, seed=False, auto_track=True):
+    def __init__(self, data_directory=None, port=3847, seed=False, auto_track=True, recovery_plan=None):
         self.data_dir = Path(data_directory) if data_directory else desktop_data_directory()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         if data_directory is None:
@@ -75,6 +75,21 @@ class DesktopBackend:
         self.backup_dir = self.data_dir / "backups"
         self.backup_dir.mkdir(exist_ok=True)
         self._backup_day = None
+        self.recovery_result = None
+        if recovery_plan:
+            from recovery import apply_gap_plan
+            plan_path = Path(recovery_plan)
+            try:
+                plan = json.loads(plan_path.read_text(encoding="utf-8"))
+                if Path(plan["data_directory"]).resolve() != self.data_dir.resolve():
+                    raise ValueError("복원 계획의 데이터 저장 위치가 다릅니다.")
+                with self.tracker.lock:
+                    self.recovery_result = apply_gap_plan(self.store, plan, self.backup_dir)
+                (self.data_dir / "gap-recovery-result.json").write_text(json.dumps(self.recovery_result, ensure_ascii=False, indent=2), encoding="utf-8")
+                plan_path.unlink()
+            except Exception as exc:
+                self.recovery_result = {"error": str(exc)}
+                logging.exception("Approved gap recovery deferred")
         self.backup_daily()
         self.stop_event = threading.Event()
         self.extension_dir = self.data_dir / "browser-extension"
@@ -174,7 +189,8 @@ class DesktopBackend:
                         writer.writerow([
                             day, csv_safe(names.get(session["target_id"], "작업")),
                             format_time(start), format_time(end), f"{(end - start) / 60:.2f}",
-                            sources[session["source"]], csv_safe(session["note"]),
+                            sources[session["source"]] + (" · 추정 복원 포함" if session.get("recovered_seconds", 0) else ""),
+                            csv_safe(session["note"]),
                         ])
                         count += 1
         return count

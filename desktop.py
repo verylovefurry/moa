@@ -15,6 +15,9 @@ import sys
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--apply-update":
     from updates import apply_update
     raise SystemExit(apply_update(sys.argv[2]))
+if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--recover-gaps":
+    from recovery import run_recovery_job
+    raise SystemExit(run_recovery_job(sys.argv[2]))
 
 from PySide6.QtCore import QDate, QLocale, QSettings, QSize, QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette
@@ -588,6 +591,9 @@ class MoaWindow(QMainWindow):
             item.setToolTip(f"{target.get('name', '작업')}\n{format_time(clipped_start)} — {format_time(clipped_end)}" + (f"\n{entry['note']}" if entry["note"] else ""))
             self.day_table.setItem(row, 0, item)
             source = {"demo": "샘플", "auto": "자동", "timer": "이전 수동", "manual": "이전 수동"}[entry["source"]]
+            if entry.get("recovered_seconds", 0):
+                source = "추정 복원 포함"
+                item.setToolTip(item.toolTip() + f"\n추정 복원 포함: {format_duration(entry['recovered_seconds'], precise=True)}")
             second = QTableWidgetItem(f"{format_duration(clipped_end - clipped_start, precise=True)}\n{source}")
             self.day_table.setItem(row, 1, second)
             if entry["id"] == old_selection:
@@ -646,7 +652,7 @@ class MoaWindow(QMainWindow):
 
     def update_tracking(self):
         tracker = self.snapshot["tracker"]
-        labels = {"off": "추적 중지", "waiting": "추적 대기", "recording": "자동 기록 중", "away": "자리 비움", "error": "감지 오류"}
+        labels = {"off": "추적 중지", "waiting": "추적 대기", "recording": "자동 기록 중", "continuing": "이어 기록 중", "away": "자리 비움", "error": "감지 오류"}
         status = labels.get(tracker["status"], "추적 중지")
         if tracker["enabled"] and not any(not target["archived"] for target in self.snapshot["targets"]):
             status = "추적 대상 없음"
@@ -662,7 +668,7 @@ class MoaWindow(QMainWindow):
         self.tray_tracking_action.setText(label)
         self.status_text.setText(status)
         self.idle_status.setText(f"자리 비움 {self.snapshot['settings']['idle_minutes']}분   ")
-        elapsed = self.snapshot["now"] - tracker["session_start"] if tracker["status"] == "recording" and tracker["session_start"] else 0
+        elapsed = self.snapshot["now"] - tracker["session_start"] if tracker["status"] in ("recording", "continuing") and tracker["session_start"] else 0
         self.live_clock.setText(format_clock(elapsed))
         self.live_caption.setText("자리 비움" if tracker["status"] == "away" else active or status)
         connected = tracker["browser_connected"]
@@ -909,7 +915,12 @@ def main():
             except (UpdateError, OSError):
                 logging.exception("Cached update install deferred")
     try:
-        backend = DesktopBackend(args.data_dir, args.port)
+        recovery_plan = None
+        if getattr(sys, "frozen", False) and not startup_disabled_reason(data_dir, args.port, args.no_startup, test_mode=args.test_mode):
+            candidate = Path(sys.executable).parent / "Moa.recovery.json"
+            if candidate.is_file():
+                recovery_plan = candidate
+        backend = DesktopBackend(args.data_dir, args.port, recovery_plan=recovery_plan)
     except RuntimeError as exc:
         QMessageBox.warning(None, "모아 실행", str(exc))
         return 1
@@ -931,6 +942,12 @@ def main():
         window.updater.enable_automatic(initial=True)
     if startup_error:
         window.statusBar().showMessage("자동 실행 등록 실패: " + startup_error, 15000)
+    if backend.recovery_result:
+        result = backend.recovery_result
+        if result.get("error"):
+            window.statusBar().showMessage("이전 기록 복원 보류: " + result["error"], 30000)
+        elif result.get("applied"):
+            window.statusBar().showMessage(f"이전 기록 {result['applied']:,}개 공백 추정 복원 · {format_duration(result['seconds'])}", 30000)
 
     def receive_instance():
         client = local.nextPendingConnection()
