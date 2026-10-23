@@ -194,16 +194,32 @@ class AssignmentDialog(FormDialog):
         due_row = QHBoxLayout()
         due_row.addWidget(self.has_due)
         due_row.addWidget(self.due, 1)
-        self.has_fee = QCheckBox("보수 있음")
+        self.has_fee = QCheckBox("입력")
+        self.has_fee.setAccessibleName("의뢰비 입력")
         self.has_fee.setChecked(item.get("fee") is not None)
         self.fee = QLineEdit(f"{item['fee']:,}" if item.get("fee") is not None else "")
         self.fee.setValidator(QRegularExpressionValidator(QRegularExpression(r"[0-9,]{0,15}"), self.fee))
+        self.fee.setAccessibleName("의뢰비 금액")
+        self.fee.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.fee.setEnabled(self.has_fee.isChecked())
         self.has_fee.toggled.connect(self.fee.setEnabled)
         fee_row = QHBoxLayout()
         fee_row.addWidget(self.has_fee)
         fee_row.addWidget(self.fee, 1)
         fee_row.addWidget(QLabel("원"))
+        self.has_net_fee = QCheckBox("입력")
+        self.has_net_fee.setAccessibleName("실수령액 입력")
+        self.has_net_fee.setChecked(item.get("net_fee") is not None)
+        self.net_fee = QLineEdit(f"{item['net_fee']:,}" if item.get("net_fee") is not None else "")
+        self.net_fee.setValidator(QRegularExpressionValidator(QRegularExpression(r"[0-9,]{0,15}"), self.net_fee))
+        self.net_fee.setAccessibleName("실수령액 금액")
+        self.net_fee.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.net_fee.setEnabled(self.has_net_fee.isChecked())
+        self.has_net_fee.toggled.connect(self.net_fee.setEnabled)
+        net_fee_row = QHBoxLayout()
+        net_fee_row.addWidget(self.has_net_fee)
+        net_fee_row.addWidget(self.net_fee, 1)
+        net_fee_row.addWidget(QLabel("원"))
         self.status = QComboBox()
         for value, label in STATUSES:
             self.status.addItem(label, value)
@@ -214,25 +230,29 @@ class AssignmentDialog(FormDialog):
         self.form.addRow("의뢰인(&C)", self.client)
         self.form.addRow("시작일(&S)", self.start)
         self.form.addRow("마감", due_row)
-        self.form.addRow("보수", fee_row)
+        self.form.addRow("의뢰비", fee_row)
+        self.form.addRow("실수령액", net_fee_row)
         self.form.addRow("진행 상태(&P)", self.status)
         self.form.addRow("메모(&N)", self.note)
         self.title.setFocus()
 
     def save(self):
         try:
-            fee = None
-            if self.has_fee.isChecked():
-                digits = self.fee.text().replace(",", "").strip()
-                if not digits:
-                    raise ValueError("보수 금액을 입력해주세요.")
-                fee = int(digits)
+            amounts = {}
+            for key, label, enabled, field in (("fee", "의뢰비", self.has_fee, self.fee),
+                                                ("net_fee", "실수령액", self.has_net_fee, self.net_fee)):
+                amounts[key] = None
+                if enabled.isChecked():
+                    digits = field.text().replace(",", "").strip()
+                    if not digits:
+                        raise ValueError(f"{label} 금액을 입력해주세요.")
+                    amounts[key] = int(digits)
             self.backend.command("assignments", {
                 "id": self.assignment["id"] if self.assignment else None,
                 "title": self.title.text(), "client": self.client.text(),
                 "start_date": self.start.date().toString("yyyy-MM-dd"),
                 "due_date": self.due.date().toString("yyyy-MM-dd") if self.has_due.isChecked() else None,
-                "fee": fee, "status": self.status.currentData(), "note": self.note.toPlainText(),
+                **amounts, "status": self.status.currentData(), "note": self.note.toPlainText(),
             })
         except (ValueError, RuntimeError) as exc:
             self.show_error(exc)
@@ -363,7 +383,7 @@ class HelpDialog(QDialog):
         title = QLabel("모아 · 작업 시간 기록")
         title.setFont(QFont(QApplication.font().family(), 13, QFont.Weight.DemiBold))
         layout.addWidget(title)
-        text = QLabel("자동 기록\n앱이 실행되면 등록한 프로그램 또는 활성 URL을 자동으로 감지합니다.\n수동 시간 추가·수동 타이머·기록 수정은 지원하지 않습니다.\n\n자리 비움\n설정한 시간 이상 입력이 없으면 마지막 입력 이후 시간을 제외하고,\n복귀하여 작업을 시작하면 자동으로 이어집니다.\n\n일정 관리\n새 의뢰·할 일에 시작일, 의뢰인, 마감일, 보수를 입력합니다.\n타임라인에서 6단계 상태를 변경할 수 있으며 변경 이력도 보관됩니다.\n\n자동 실행과 저장\nWindows 로그인 시 알림 영역에서 실행됩니다. 설정에서 변경할 수 있습니다.\n기록은 매초 저장하고 일별·종료 시 백업합니다. 강제 종료 시에는\n마지막 저장 시점까지 복구하며 꺼져 있던 시간은 합산하지 않습니다.\n\n주요 단축키\nCtrl+L  연·월 바로 이동      Ctrl+N  새 일정\nCtrl+R  자동 추적 일시정지 / 재개\nCtrl+Shift+N  추적 대상 추가     Ctrl+Shift+E  CSV 내보내기\nAlt+1 / Alt+2 / Alt+3 / Alt+4  달력 / 일정 / 통계 / 추적 대상\nCtrl+Q  완전히 종료")
+        text = QLabel("자동 기록\n앱이 실행되면 등록한 프로그램 또는 활성 URL을 자동으로 감지합니다.\n수동 시간 추가·수동 타이머·기록 수정은 지원하지 않습니다.\n\n자리 비움\n설정한 시간 이상 입력이 없으면 마지막 입력 이후 시간을 제외하고,\n복귀하여 작업을 시작하면 자동으로 이어집니다.\n\n일정 관리\n새 의뢰·할 일에 시작일, 의뢰인, 마감일을 입력합니다.\n의뢰비와 수수료·환전 후 실수령액을 각각 기록할 수 있습니다.\n타임라인에서 6단계 상태를 변경할 수 있으며 변경 이력도 보관됩니다.\n\n자동 실행과 저장\nWindows 로그인 시 알림 영역에서 실행됩니다. 설정에서 변경할 수 있습니다.\n기록은 매초 저장하고 일별·종료 시 백업합니다. 강제 종료 시에는\n마지막 저장 시점까지 복구하며 꺼져 있던 시간은 합산하지 않습니다.\n\n주요 단축키\nCtrl+L  연·월 바로 이동      Ctrl+N  새 일정\nCtrl+R  자동 추적 일시정지 / 재개\nCtrl+Shift+N  추적 대상 추가     Ctrl+Shift+E  CSV 내보내기\nAlt+1 / Alt+2 / Alt+3 / Alt+4  달력 / 일정 / 통계 / 추적 대상\nCtrl+Q  완전히 종료")
         text.setWordWrap(True)
         text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(text)

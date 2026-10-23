@@ -47,7 +47,7 @@ os._exit(0)
             backend=DesktopBackend(Path(directory),port=0,auto_track=False)
             seed_test_store(backend.store)
             backend.store.add_session("code",1000,1060,"auto")
-            save_assignment(backend.store.db,{"title":"백업 테스트","start_date":"2026-10-16"})
+            save_assignment(backend.store.db,{"title":"백업 테스트","start_date":"2026-10-16","fee":150000,"net_fee":132912})
             backup_dir=backend.backup_dir
             backend.close()
             self.assertTrue((backup_dir/"latest.sqlite3").is_file())
@@ -55,6 +55,7 @@ os._exit(0)
             backup=Store(backup_dir/"latest.sqlite3",seed=False)
             self.assertEqual(len(backup.sessions()),1)
             self.assertEqual(backup.db.execute("SELECT title FROM assignments").fetchone()[0],"백업 테스트")
+            self.assertEqual(tuple(backup.db.execute("SELECT fee,net_fee FROM assignments").fetchone()),(150000,132912))
             backup.db.close()
 
     def test_desktop_resumes_auto_tracking_without_manual_start(self):

@@ -191,19 +191,20 @@ class SchedulePage(QWidget):
         layout.addWidget(self.count_label)
         self.views = QStackedWidget()
         self.timeline = QTableWidget()
-        prepare_table(self.timeline, ["의뢰·할 일 / 의뢰인", "진행 상태", "보수", "기간"])
+        prepare_table(self.timeline, ["의뢰·할 일 / 의뢰인", "진행 상태", "의뢰비 / 실수령액", "기간"])
         self.timeline.setAccessibleName("의뢰와 할 일 월간 타임라인")
         self.timeline.setObjectName("assignmentTimeline")
         self.timeline.setColumnWidth(0, 230)
         self.timeline.setColumnWidth(1, 116)
-        self.timeline.setColumnWidth(2, 112)
+        self.timeline.setColumnWidth(2, 164)
         self.timeline_header = TimelineHeader(self.timeline)
         self.timeline.setHorizontalHeader(self.timeline_header)
         self.timeline.setColumnWidth(0, 230)
         self.timeline.setColumnWidth(1, 116)
-        self.timeline.setColumnWidth(2, 112)
+        self.timeline.setColumnWidth(2, 164)
         self.timeline.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.timeline.setItemDelegateForColumn(0, RecordDelegate(self.timeline))
+        self.timeline.setItemDelegateForColumn(2, RecordDelegate(self.timeline))
         self.timeline_delegate = TimelineDelegate(self.timeline)
         self.timeline.setItemDelegateForColumn(3, self.timeline_delegate)
         self.timeline.verticalHeader().setDefaultSectionSize(66)
@@ -211,13 +212,14 @@ class SchedulePage(QWidget):
         self.timeline.itemDoubleClicked.connect(lambda item: self.edit_assignment() if item.column() != 1 else None)
         self.views.addWidget(self.timeline)
         self.list = QTableWidget()
-        prepare_table(self.list, ["의뢰·할 일", "의뢰인", "시작일", "마감일", "보수", "진행 상태"])
+        prepare_table(self.list, ["의뢰·할 일", "의뢰인", "시작일", "마감일", "의뢰비", "실수령액", "진행 상태"])
         self.list.setAccessibleName("의뢰와 할 일 목록")
-        self.list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column, width in ((1, 130), (2, 108), (3, 108), (4, 112), (5, 116)):
+        self.list.horizontalHeader().setMinimumSectionSize(108)
+        self.list.setColumnWidth(0, 200)
+        for column, width in ((1, 112), (2, 108), (3, 108), (4, 148), (5, 148), (6, 116)):
             self.list.setColumnWidth(column, width)
         self.list.itemSelectionChanged.connect(lambda: self.select_row(self.list))
-        self.list.itemDoubleClicked.connect(lambda item: self.edit_assignment() if item.column() != 5 else None)
+        self.list.itemDoubleClicked.connect(lambda item: self.edit_assignment() if item.column() != 6 else None)
         self.views.addWidget(self.list)
         self.empty = muted_label("이달 일정 없음")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -268,7 +270,7 @@ class SchedulePage(QWidget):
         form.setHorizontalSpacing(18)
         form.setVerticalSpacing(10)
         self.detail_fields = {}
-        for key, caption in (("client", "의뢰인"), ("start_date", "시작일"), ("due_date", "마감일"), ("fee", "보수")):
+        for key, caption in (("client", "의뢰인"), ("start_date", "시작일"), ("due_date", "마감일"), ("fee", "의뢰비"), ("net_fee", "실수령액")):
             value = QLabel()
             value.setWordWrap(True)
             value.setTextFormat(Qt.TextFormat.PlainText)
@@ -351,22 +353,28 @@ class SchedulePage(QWidget):
             table.setRowCount(len(values))
         for row, item in enumerate(values):
             deadline = item["due_date"] or "마감 없음"
-            tooltip = f"{item['title']}\n의뢰인: {item['client'] or '개인 할 일'}\n{item['start_date']} → {deadline}\n보수: {fee_text(item['fee'])}\n{STATUS_LABELS[item['status']]}"
+            net_fee = item.get("net_fee")
+            tooltip = f"{item['title']}\n의뢰인: {item['client'] or '개인 할 일'}\n{item['start_date']} → {deadline}\n의뢰비: {fee_text(item['fee'])}\n실수령액: {fee_text(net_fee)}\n{STATUS_LABELS[item['status']]}"
             title = QTableWidgetItem(f"{item['title']}\n{item['client'] or '개인 할 일'}")
             title.setToolTip(tooltip)
             self.timeline.setItem(row, 0, title)
             self.timeline.setItem(row, 1, QTableWidgetItem())
-            self.timeline.setItem(row, 2, QTableWidgetItem(fee_text(item["fee"])))
+            amounts = QTableWidgetItem(f"{fee_text(item['fee'])}\n{fee_text(net_fee) if net_fee is not None else '미입력'}")
+            amounts.setToolTip(tooltip)
+            amounts.setData(Qt.ItemDataRole.AccessibleTextRole, f"의뢰비 {fee_text(item['fee'])}, 실수령액 {fee_text(net_fee)}")
+            self.timeline.setItem(row, 2, amounts)
             period = QTableWidgetItem()
             period.setData(SCHEDULE_ROLE, item)
             period.setToolTip(tooltip)
             period.setData(Qt.ItemDataRole.AccessibleTextRole, f"{item['start_date']}부터 {deadline}까지" if item["due_date"] else f"시작일 {item['start_date']} · 마감 없음")
             self.timeline.setItem(row, 3, period)
-            for column, text in enumerate((item["title"], item["client"] or "개인 할 일", item["start_date"], deadline, fee_text(item["fee"]), "")):
+            for column, text in enumerate((item["title"], item["client"] or "개인 할 일", item["start_date"], deadline, fee_text(item["fee"]), fee_text(net_fee), "")):
                 entry = QTableWidgetItem(text)
                 entry.setToolTip(tooltip)
+                if column in (4, 5):
+                    entry.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.list.setItem(row, column, entry)
-            for table, column in ((self.timeline, 1), (self.list, 5)):
+            for table, column in ((self.timeline, 1), (self.list, 6)):
                 combo = QComboBox()
                 combo.setAccessibleName(f"{item['title']} 진행 상태")
                 for status, label in STATUSES:
@@ -420,7 +428,8 @@ class SchedulePage(QWidget):
         self.detail_title.setToolTip(item["title"])
         self.detail_status.setText(STATUS_LABELS[item["status"]])
         values = {"client": item["client"] or "개인 할 일", "start_date": item["start_date"],
-                  "due_date": item["due_date"] or "없음", "fee": fee_text(item["fee"]) if item["fee"] is not None else "없음"}
+                  "due_date": item["due_date"] or "없음", "fee": fee_text(item["fee"]) if item["fee"] is not None else "없음",
+                  "net_fee": fee_text(item["net_fee"]) if item.get("net_fee") is not None else "미입력"}
         for key, value in values.items():
             self.detail_fields[key].setText(value)
         note = item["note"] or "없음"

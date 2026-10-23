@@ -138,7 +138,59 @@ class DesktopTests(unittest.TestCase):
         item = self.backend.state()["assignments"][0]
         self.assertIsNone(item["due_date"])
         self.assertIsNone(item["fee"])
+        self.assertIsNone(item["net_fee"])
         self.assertEqual(item["client"], "")
+        dialog.deleteLater()
+
+    def test_assignment_amounts_save_display_and_edit_separately(self):
+        dialog = AssignmentDialog(self.window, self.backend)
+        dialog.title.setText("해외 의뢰")
+        dialog.start.setDate(QDate(2026, 10, 1))
+        dialog.has_fee.setChecked(True)
+        dialog.fee.setText("150,000")
+        dialog.has_net_fee.setChecked(True)
+        dialog.net_fee.setText("132,912")
+        dialog.save()
+        self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
+        item = self.backend.state()["assignments"][0]
+        self.assertEqual((item["fee"], item["net_fee"]), (150000, 132912))
+        self.assertEqual(item["status"], "not_started")
+        self.window.set_month(2026, 10)
+        self.window.refresh(force=True)
+        page = self.window.schedule_page
+        self.assertEqual(page.timeline.item(0, 2).text(), "150,000원\n132,912원")
+        self.assertEqual(page.list.item(0, 4).text(), "150,000원")
+        self.assertEqual(page.list.item(0, 5).text(), "132,912원")
+        self.assertEqual(page.list.cellWidget(0, 6).findChild(QComboBox).count(), 6)
+        self.assertEqual(page.detail_fields["fee"].text(), "150,000원")
+        self.assertEqual(page.detail_fields["net_fee"].text(), "132,912원")
+        edit = AssignmentDialog(self.window, self.backend, item)
+        self.assertTrue(edit.has_fee.isChecked())
+        self.assertTrue(edit.has_net_fee.isChecked())
+        self.assertEqual((edit.fee.text(), edit.net_fee.text()), ("150,000", "132,912"))
+        edit.net_fee.setText("0")
+        edit.save()
+        item = self.backend.state()["assignments"][0]
+        self.assertEqual((item["fee"], item["net_fee"]), (150000, 0))
+        clear = AssignmentDialog(self.window, self.backend, item)
+        clear.has_net_fee.setChecked(False)
+        self.assertFalse(clear.net_fee.isEnabled())
+        clear.save()
+        item = self.backend.state()["assignments"][0]
+        self.assertEqual(item["fee"], 150000)
+        self.assertIsNone(item["net_fee"])
+        self.assertEqual(len(self.backend.state()["assignment_history"]), 1)
+        for form in (dialog, edit, clear):
+            form.deleteLater()
+
+    def test_empty_enabled_net_amount_keeps_dialog_open_and_does_not_save(self):
+        dialog = AssignmentDialog(self.window, self.backend)
+        dialog.title.setText("금액 확인")
+        dialog.has_net_fee.setChecked(True)
+        dialog.save()
+        self.assertNotEqual(dialog.result(), QDialog.DialogCode.Accepted)
+        self.assertEqual(self.backend.state()["assignments"], [])
+        self.assertIn("실수령액", dialog.error.text())
         dialog.deleteLater()
 
     def test_timeline_and_six_status_changes_persist(self):
@@ -198,7 +250,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(page.detail_title.text(),"표지 작업")
         self.assertEqual(page.detail_status.text(),"최종 완료")
         self.assertEqual({key:label.text() for key,label in page.detail_fields.items()},
-                         {"client":"의뢰인", "start_date":"2026-10-01", "due_date":"2026-10-31", "fee":"0원"})
+                         {"client":"의뢰인", "start_date":"2026-10-01", "due_date":"2026-10-31", "fee":"0원", "net_fee":"미입력"})
         self.assertEqual(page.detail_note.toPlainText(),note)
         self.assertTrue(page.detail_note.isReadOnly())
         self.assertEqual(page.detail_history.rowCount(),6)

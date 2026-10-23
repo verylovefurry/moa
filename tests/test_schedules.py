@@ -1,3 +1,6 @@
+from pathlib import Path
+import sqlite3
+import tempfile
 import unittest
 
 from tracker import Store
@@ -32,6 +35,81 @@ class ScheduleDataTests(unittest.TestCase):
         self.assertEqual(len(state["assignment_history"]),6)
         self.assertEqual(state["assignments"][0]["status"],"completed")
         self.assertEqual(state["assignments"][0]["completed_at"],1006)
+
+    def test_commission_and_net_received_are_independent_optional_amounts(self):
+        for fee, net_fee in ((150000, 132912), (150000, None), (None, 132912), (0, 0), (150000, 160000)):
+            with self.subTest(fee=fee, net_fee=net_fee):
+                assignment_id = save_assignment(self.db, {**self.payload, "fee":fee, "net_fee":net_fee})
+                saved = next(item for item in schedule_state(self.db)["assignments"] if item["id"] == assignment_id)
+                self.assertEqual((saved["fee"], saved["net_fee"]), (fee, net_fee))
+
+    def test_edit_preserves_omitted_net_amount_and_explicit_null_clears_it(self):
+        assignment_id = save_assignment(self.db, {**self.payload, "net_fee":132912, "status":"paid"})
+        payload = {**self.payload, "id":assignment_id, "fee":150000, "status":"paid"}
+        save_assignment(self.db, payload)
+        saved = schedule_state(self.db)["assignments"][0]
+        self.assertEqual((saved["fee"], saved["net_fee"]), (150000, 132912))
+        save_assignment(self.db, {**payload, "net_fee":0})
+        self.assertEqual(schedule_state(self.db)["assignments"][0]["net_fee"], 0)
+        save_assignment(self.db, {**payload, "net_fee":None})
+        state = schedule_state(self.db)
+        self.assertIsNone(state["assignments"][0]["net_fee"])
+        self.assertEqual(len(state["assignment_history"]), 1)
+
+    def test_invalid_net_amounts_reject_create_and_edit_without_partial_changes(self):
+        for value in (-1, 12.5, True, "132912", 1_000_000_000_000):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                save_assignment(self.db, {**self.payload, "net_fee":value})
+        self.assertEqual(schedule_state(self.db)["assignments"], [])
+        self.assertEqual(schedule_state(self.db)["assignment_history"], [])
+        assignment_id = save_assignment(self.db, {**self.payload, "fee":150000, "net_fee":132912})
+        before = schedule_state(self.db)
+        for value in (-1, 12.5, True, "132912", 1_000_000_000_000):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                save_assignment(self.db, {**self.payload, "id":assignment_id, "net_fee":value, "status":"paid"})
+            self.assertEqual(schedule_state(self.db), before)
+
+    def test_legacy_schedule_migration_keeps_amounts_history_and_persists_new_field(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.sqlite3"
+            with sqlite3.connect(path) as legacy:
+                legacy.executescript("""
+                    CREATE TABLE assignments (
+                        id TEXT PRIMARY KEY, title TEXT NOT NULL, client TEXT NOT NULL DEFAULT '',
+                        start_date TEXT NOT NULL, due_date TEXT, fee INTEGER,
+                        status TEXT NOT NULL DEFAULT 'not_started', note TEXT NOT NULL DEFAULT '',
+                        created_at REAL NOT NULL, updated_at REAL NOT NULL, completed_at REAL,
+                        archived INTEGER NOT NULL DEFAULT 0,
+                        CHECK (fee IS NULL OR fee >= 0),
+                        CHECK (status IN ('not_started','in_progress','first_done','delivered','paid','completed'))
+                    );
+                    CREATE TABLE assignment_history (
+                        id TEXT PRIMARY KEY, assignment_id TEXT NOT NULL REFERENCES assignments(id),
+                        from_status TEXT, to_status TEXT NOT NULL, changed_at REAL NOT NULL
+                    );
+                    INSERT INTO assignments VALUES
+                        ('legacy','기존 의뢰','의뢰인','2026-10-01',NULL,150000,'paid','기존 메모',100,200,NULL,0);
+                    INSERT INTO assignment_history VALUES ('history','legacy',NULL,'paid',100);
+                """)
+            legacy.close()
+            upgraded = Store(path, seed=False)
+            try:
+                state = schedule_state(upgraded.db)
+                saved = state["assignments"][0]
+                self.assertEqual((saved["fee"], saved["net_fee"]), (150000, None))
+                self.assertEqual((saved["title"], saved["note"], saved["created_at"]), ("기존 의뢰", "기존 메모", 100))
+                self.assertEqual(state["assignment_history"][0]["id"], "history")
+                save_assignment(upgraded.db, {**saved, "net_fee":132912})
+            finally:
+                upgraded.db.close()
+            reopened = Store(path, seed=False)
+            try:
+                state = schedule_state(reopened.db)
+                self.assertEqual((state["assignments"][0]["fee"], state["assignments"][0]["net_fee"]), (150000, 132912))
+                self.assertEqual(len(state["assignment_history"]), 1)
+                self.assertEqual(reopened.db.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            finally:
+                reopened.db.close()
 
     def test_reopening_completed_task_preserves_history(self):
         assignment_id=save_assignment(self.db,self.payload)
