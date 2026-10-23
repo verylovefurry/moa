@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from desktop_dialogs import AssignmentDialog, muted_label
 from desktop_finances import FeeSummary
-from desktop_widgets import RecordDelegate, prepare_table
+from desktop_widgets import NoWheelComboBox, RecordDelegate, prepare_table
 from schedules import STATUSES, STATUS_LABELS, STATUS_COLORS, assignment_period, fee_text
 from tracker import KST
 
@@ -389,7 +389,7 @@ class SchedulePage(QWidget):
                     entry.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.list.setItem(row, column, entry)
             for table, column in ((self.timeline, 1), (self.list, 6)):
-                combo = QComboBox()
+                combo = NoWheelComboBox()
                 combo.setAccessibleName(f"{item['title']} 진행 상태")
                 for status, label in STATUSES:
                     combo.addItem(label, status)

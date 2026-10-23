@@ -8,13 +8,14 @@ from unittest.mock import patch, Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QDate, QEvent, QPoint, QTime
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtCore import QCoreApplication, QDate, QEvent, QPoint, QPointF, QTime, Qt
+from PySide6.QtGui import QFontDatabase, QWheelEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog
 from desktop import MoaWindow, configure_application, parse_arguments
 from desktop_backend import DesktopBackend, migrate_legacy_database
 from desktop_dialogs import AssignmentDialog, MonthDialog, SettingsDialog, TargetDialog
-from schedules import STATUSES, archive_assignment, save_assignment
+from schedules import STATUSES, archive_assignment, change_assignment_status, save_assignment
 from tracker import Store
 from tests.fixtures import seed_test_store
 from desktop_update import UpdateDialog
@@ -196,7 +197,7 @@ class DesktopTests(unittest.TestCase):
     def test_fee_summary_month_year_custom_range_and_cumulative_totals(self):
         for day, fee, net_fee in (("2025-12-31",1000,900), ("2026-01-01",150000,132912),
                                   ("2026-10-31",200000,None), ("2026-11-01",0,0), ("2027-01-01",10000,8000)):
-            save_assignment(self.backend.store.db, {"title":day, "start_date":day, "fee":fee, "net_fee":net_fee})
+            save_assignment(self.backend.store.db, {"title":day, "start_date":day, "fee":fee, "net_fee":net_fee, "status":"paid"})
         self.window.refresh(force=True)
         self.window.nav.setCurrentRow(1)
         page = self.window.schedule_page
@@ -242,7 +243,7 @@ class DesktopTests(unittest.TestCase):
         self.assertIs(page.views.currentWidget(), summary)
         self.assertEqual(summary.table.item(0,1).text(), "0원")
         self.assertEqual(summary.table.item(1,1).text(), "0원")
-        payload = {"title":"합계 갱신", "start_date":"2026-10-01", "fee":150000, "net_fee":132912}
+        payload = {"title":"합계 갱신", "start_date":"2026-10-01", "fee":150000, "net_fee":132912, "status":"paid"}
         assignment_id = save_assignment(self.backend.store.db, payload)
         self.window.refresh(force=True)
         self.assertEqual(summary.table.item(1,1).text(), "132,912원")
@@ -254,6 +255,14 @@ class DesktopTests(unittest.TestCase):
         self.window.refresh(force=True)
         self.assertEqual(summary.table.item(1,1).text(), "150,000원")
         self.assertEqual(summary.table.item(1,2).text(), "1건")
+        change_assignment_status(self.backend.store.db, assignment_id, "delivered")
+        self.window.refresh(force=True)
+        self.assertEqual(summary.table.item(0,1).text(), "0원")
+        self.assertEqual(summary.table.item(1,1).text(), "0원")
+        change_assignment_status(self.backend.store.db, assignment_id, "completed")
+        self.window.refresh(force=True)
+        self.assertEqual(summary.table.item(0,1).text(), "150,000원")
+        self.assertEqual(summary.table.item(1,1).text(), "150,000원")
         archive_assignment(self.backend.store.db, assignment_id)
         self.window.refresh(force=True)
         self.assertEqual(summary.table.item(0,1).text(), "0원")
@@ -278,6 +287,7 @@ class DesktopTests(unittest.TestCase):
         self.window.refresh(force=True)
         page = self.window.schedule_page
         self.assertEqual(page.timeline.rowCount(), 1)
+
         status_control = page.timeline.cellWidget(0, 1).findChild(QComboBox)
         self.assertEqual(status_control.count(), 6)
         self.assertLessEqual(status_control.maximumHeight(), 30)
@@ -288,6 +298,63 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(len(self.backend.state()["assignment_history"]), 6)
         self.window.set_month(2026, 11)
         self.assertEqual(page.timeline.rowCount(), 1)
+
+    @staticmethod
+    def wheel_over(control, delta):
+        position = control.rect().center()
+        event = QWheelEvent(QPointF(position), QPointF(control.mapToGlobal(position)),
+                            QPoint(), QPoint(0,delta), Qt.MouseButton.NoButton,
+                            Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+        QApplication.sendEvent(control, event)
+
+    def test_status_wheel_never_changes_saved_timeline_or_list_status(self):
+        save_assignment(self.backend.store.db, {"title":"휠 입력 확인", "start_date":"2026-10-01", "status":"first_done"})
+        self.window.set_month(2026,10)
+        self.window.refresh(force=True)
+        self.window.nav.setCurrentRow(1)
+        page = self.window.schedule_page
+        for index, table, column in ((0,page.timeline,1), (1,page.list,6)):
+            page.tabs.setCurrentIndex(index)
+            self.app.processEvents()
+            combo = table.cellWidget(0,column).findChild(QComboBox)
+            for focused in (False, True):
+                (combo.setFocus if focused else combo.clearFocus)()
+                for delta in (-120,120):
+                    self.wheel_over(combo, delta)
+                    self.assertEqual(combo.currentData(), "first_done")
+            combo.showPopup()
+            self.app.processEvents()
+            for delta in (-120,120):
+                self.wheel_over(combo.view().viewport(), delta)
+                self.assertEqual(combo.currentData(), "first_done")
+            combo.hidePopup()
+            state = self.backend.state()
+            self.assertEqual(state["assignments"][0]["status"], "first_done")
+            self.assertEqual(len(state["assignment_history"]), 1)
+        combo.showPopup()
+        self.app.processEvents()
+        option = combo.model().index(combo.findData("delivered"),0)
+        combo.view().scrollTo(option)
+        QTest.mouseClick(combo.view().viewport(), Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.NoModifier, combo.view().visualRect(option).center())
+        self.assertEqual(self.backend.state()["assignments"][0]["status"], "delivered")
+        self.assertEqual(len(self.backend.state()["assignment_history"]), 2)
+
+    def test_assignment_dialog_status_ignores_wheel_and_accepts_selection(self):
+        dialog = AssignmentDialog(self.window, self.backend)
+        dialog.title.setText("상태 선택 확인")
+        dialog.status.setCurrentIndex(dialog.status.findData("first_done"))
+        dialog.show()
+        self.app.processEvents()
+        dialog.status.setFocus()
+        for delta in (-120,120):
+            self.wheel_over(dialog.status, delta)
+            self.assertEqual(dialog.status.currentData(), "first_done")
+        QTest.keyClick(dialog.status, Qt.Key.Key_Down)
+        self.assertEqual(dialog.status.currentData(), "delivered")
+        dialog.save()
+        self.assertEqual(self.backend.state()["assignments"][0]["status"], "delivered")
+        dialog.deleteLater()
 
     def test_no_deadline_schedule_only_appears_in_its_start_month(self):
         from datetime import datetime

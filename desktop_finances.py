@@ -145,7 +145,7 @@ class FeeSummary(QWidget):
             start = end = None
         totals = assignment_totals(self.assignments, start, end)
         period = f"{start} ~ {end}" if start is not None else "전체 기간"
-        self.period_label.setText(f"{period} · 일정 {totals['count']:,}건")
+        self.period_label.setText(f"{period} · 보수 수령·최종 완료 {totals['count']:,}건")
         for row, (key, caption) in enumerate((("fee", "의뢰비"), ("net_fee", "실수령액"))):
             entered = totals[key + "_entered"]
             fallback = totals["net_fee_fallback"] if key == "net_fee" else 0

@@ -143,12 +143,14 @@ def fee_text(value):
 
 
 def assignment_totals(assignments, start=None, end=None):
-    """Sum entered amounts once per assignment, using inclusive start-date bounds."""
+    """Sum paid/completed assignments once, using inclusive start-date bounds."""
     if start is not None and end is not None and start > end:
         raise ValueError("종료일은 시작일보다 빠를 수 없습니다.")
     totals = {"count": 0, "fee": 0, "net_fee": 0, "fee_entered": 0, "net_fee_entered": 0, "net_fee_fallback": 0}
     for item in assignments:
-        if item.get("archived") or (start is not None and item["start_date"] < start) or (end is not None and item["start_date"] > end):
+        if item.get("archived") or item.get("status") not in ("paid", "completed"):
+            continue
+        if (start is not None and item["start_date"] < start) or (end is not None and item["start_date"] > end):
             continue
         totals["count"] += 1
         for key in ("fee", "net_fee"):

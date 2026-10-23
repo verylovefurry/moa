@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSpinBox, QPlainTextEdit, QVBoxLayout, QWidget,
 )
 
-from desktop_widgets import color_icon
+from desktop_widgets import NoWheelComboBox, color_icon
 from tracker import COLORS, SWITCH_GRACE_MINUTES
 from schedules import STATUSES
 
@@ -220,7 +220,7 @@ class AssignmentDialog(FormDialog):
         net_fee_row.addWidget(self.has_net_fee)
         net_fee_row.addWidget(self.net_fee, 1)
         net_fee_row.addWidget(QLabel("원"))
-        self.status = QComboBox()
+        self.status = NoWheelComboBox()
         for value, label in STATUSES:
             self.status.addItem(label, value)
         self.status.setCurrentIndex(self.status.findData(item.get("status", "not_started")))

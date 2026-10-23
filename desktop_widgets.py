@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from PySide6.QtCore import Qt, QRect, QRectF, QSize, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHeaderView, QStyle, QStyledItemDelegate,
+    QAbstractItemView, QComboBox, QHeaderView, QStyle, QStyledItemDelegate,
     QTableWidget, QTableWidgetItem, QWidget,
 )
 
@@ -19,6 +19,16 @@ MUTED = "#66736b"
 LINE = "#dfe4e1"
 DAY_ROLE = Qt.ItemDataRole.UserRole + 1
 PAYLOAD_ROLE = Qt.ItemDataRole.UserRole + 2
+
+
+class NoWheelComboBox(QComboBox):
+    """Keep choices explicit while allowing wheel events to reach the parent."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event):
+        event.ignore()
 
 
 def app_icon() -> QIcon:

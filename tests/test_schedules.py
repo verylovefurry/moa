@@ -143,7 +143,7 @@ class ScheduleDataTests(unittest.TestCase):
 class AssignmentTotalTests(unittest.TestCase):
     def setUp(self):
         self.assignments = [
-            {"start_date":day, "fee":fee, "net_fee":net_fee}
+            {"start_date":day, "fee":fee, "net_fee":net_fee, "status":"paid"}
             for day, fee, net_fee in (
                 ("2025-12-31", 500000, 480000), ("2026-01-01", 150000, 132912),
                 ("2026-09-30", 100000, 90000), ("2026-10-01", 200000, None),
@@ -152,7 +152,8 @@ class AssignmentTotalTests(unittest.TestCase):
             )
         ]
         self.assignments[2]["due_date"] = "2026-10-31"
-        self.assignments.append({"start_date":"2026-10-15", "fee":999999, "net_fee":999999, "archived":1})
+        self.assignments[4]["status"] = "completed"
+        self.assignments.append({"start_date":"2026-10-15", "fee":999999, "net_fee":999999, "status":"paid", "archived":1})
 
     def test_month_uses_start_dates_and_never_counts_spanning_tasks_twice(self):
         self.assertEqual(assignment_totals(self.assignments, "2026-10-01", "2026-10-31"),
@@ -171,18 +172,27 @@ class AssignmentTotalTests(unittest.TestCase):
             assignment_totals(self.assignments, "2026-11-01", "2026-10-31")
 
     def test_missing_amounts_are_separate_from_zero_and_large_sums_stay_exact(self):
-        result = assignment_totals([{"start_date":"2026-10-01", "fee":None, "net_fee":0}])
+        result = assignment_totals([{"start_date":"2026-10-01", "fee":None, "net_fee":0, "status":"paid"}])
         self.assertEqual(result, {"count":1, "fee":0, "net_fee":0, "fee_entered":0, "net_fee_entered":1, "net_fee_fallback":0})
-        maximum = {"start_date":"2026-10-01", "fee":999999999999, "net_fee":999999999998}
+        maximum = {"start_date":"2026-10-01", "fee":999999999999, "net_fee":999999999998, "status":"paid"}
         result = assignment_totals([maximum, maximum])
         self.assertEqual((result["fee"], result["net_fee"]), (1999999999998, 1999999999996))
         self.assertEqual(assignment_totals([]), {"count":0, "fee":0, "net_fee":0, "fee_entered":0, "net_fee_entered":0, "net_fee_fallback":0})
 
     def test_unchecked_net_uses_commission_but_explicit_zero_and_both_missing_stay_distinct(self):
         assignments = [
-            {"start_date":"2026-10-01", "fee":150000, "net_fee":None},
-            {"start_date":"2026-10-01", "fee":200000, "net_fee":0},
-            {"start_date":"2026-10-01", "fee":None, "net_fee":None},
+            {"start_date":"2026-10-01", "fee":150000, "net_fee":None, "status":"paid"},
+            {"start_date":"2026-10-01", "fee":200000, "net_fee":0, "status":"completed"},
+            {"start_date":"2026-10-01", "fee":None, "net_fee":None, "status":"paid"},
         ]
         self.assertEqual(assignment_totals(assignments),
                          {"count":3, "fee":350000, "net_fee":150000, "fee_entered":2, "net_fee_entered":1, "net_fee_fallback":1})
+
+    def test_only_paid_and_completed_contribute_in_every_period(self):
+        base = {"start_date":"2026-10-15", "fee":150000, "net_fee":132912}
+        assignments = [{**base, "status":status} for status, _ in STATUSES]
+        assignments.extend((base, {**base, "status":"invalid"}, {**base, "status":"paid", "archived":1}))
+        expected = {"count":2, "fee":300000, "net_fee":265824, "fee_entered":2, "net_fee_entered":2, "net_fee_fallback":0}
+        for start, end in ((None,None), ("2026-01-01","2026-12-31"), ("2026-10-01","2026-10-31"), ("2026-10-15","2026-10-15")):
+            with self.subTest(start=start, end=end):
+                self.assertEqual(assignment_totals(assignments, start, end), expected)
