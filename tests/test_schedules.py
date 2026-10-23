@@ -5,7 +5,7 @@ import unittest
 
 from tracker import Store
 from tests.fixtures import seed_test_store
-from schedules import STATUSES, archive_assignment, change_assignment_status, save_assignment, schedule_state, fee_text
+from schedules import STATUSES, archive_assignment, assignment_totals, change_assignment_status, save_assignment, schedule_state, fee_text
 
 
 class ScheduleDataTests(unittest.TestCase):
@@ -138,3 +138,51 @@ class ScheduleDataTests(unittest.TestCase):
         self.assertEqual(schedule_state(self.db)["assignments"],[])
         self.assertEqual(len(self.store.sessions()),1)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM assignment_history").fetchone()[0],1)
+
+
+class AssignmentTotalTests(unittest.TestCase):
+    def setUp(self):
+        self.assignments = [
+            {"start_date":day, "fee":fee, "net_fee":net_fee}
+            for day, fee, net_fee in (
+                ("2025-12-31", 500000, 480000), ("2026-01-01", 150000, 132912),
+                ("2026-09-30", 100000, 90000), ("2026-10-01", 200000, None),
+                ("2026-10-31", 0, 0), ("2026-11-01", 300000, 270000),
+                ("2026-12-31", 400000, 350000), ("2027-01-01", 600000, 550000),
+            )
+        ]
+        self.assignments[2]["due_date"] = "2026-10-31"
+        self.assignments.append({"start_date":"2026-10-15", "fee":999999, "net_fee":999999, "archived":1})
+
+    def test_month_uses_start_dates_and_never_counts_spanning_tasks_twice(self):
+        self.assertEqual(assignment_totals(self.assignments, "2026-10-01", "2026-10-31"),
+                         {"count":2, "fee":200000, "net_fee":200000, "fee_entered":2, "net_fee_entered":1, "net_fee_fallback":1})
+
+    def test_year_and_cumulative_totals_include_both_calendar_boundaries(self):
+        self.assertEqual(assignment_totals(self.assignments, "2026-01-01", "2026-12-31"),
+                         {"count":6, "fee":1150000, "net_fee":1042912, "fee_entered":6, "net_fee_entered":5, "net_fee_fallback":1})
+        self.assertEqual(assignment_totals(self.assignments),
+                         {"count":8, "fee":2250000, "net_fee":2072912, "fee_entered":8, "net_fee_entered":7, "net_fee_fallback":1})
+
+    def test_custom_range_is_inclusive_and_rejects_reverse_bounds(self):
+        self.assertEqual(assignment_totals(self.assignments, "2026-10-31", "2026-11-01"),
+                         {"count":2, "fee":300000, "net_fee":270000, "fee_entered":2, "net_fee_entered":2, "net_fee_fallback":0})
+        with self.assertRaises(ValueError):
+            assignment_totals(self.assignments, "2026-11-01", "2026-10-31")
+
+    def test_missing_amounts_are_separate_from_zero_and_large_sums_stay_exact(self):
+        result = assignment_totals([{"start_date":"2026-10-01", "fee":None, "net_fee":0}])
+        self.assertEqual(result, {"count":1, "fee":0, "net_fee":0, "fee_entered":0, "net_fee_entered":1, "net_fee_fallback":0})
+        maximum = {"start_date":"2026-10-01", "fee":999999999999, "net_fee":999999999998}
+        result = assignment_totals([maximum, maximum])
+        self.assertEqual((result["fee"], result["net_fee"]), (1999999999998, 1999999999996))
+        self.assertEqual(assignment_totals([]), {"count":0, "fee":0, "net_fee":0, "fee_entered":0, "net_fee_entered":0, "net_fee_fallback":0})
+
+    def test_unchecked_net_uses_commission_but_explicit_zero_and_both_missing_stay_distinct(self):
+        assignments = [
+            {"start_date":"2026-10-01", "fee":150000, "net_fee":None},
+            {"start_date":"2026-10-01", "fee":200000, "net_fee":0},
+            {"start_date":"2026-10-01", "fee":None, "net_fee":None},
+        ]
+        self.assertEqual(assignment_totals(assignments),
+                         {"count":3, "fee":350000, "net_fee":150000, "fee_entered":2, "net_fee_entered":1, "net_fee_fallback":1})

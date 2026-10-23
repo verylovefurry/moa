@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog
 from desktop import MoaWindow, configure_application, parse_arguments
 from desktop_backend import DesktopBackend, migrate_legacy_database
 from desktop_dialogs import AssignmentDialog, MonthDialog, SettingsDialog, TargetDialog
-from schedules import STATUSES, save_assignment
+from schedules import STATUSES, archive_assignment, save_assignment
 from tracker import Store
 from tests.fixtures import seed_test_store
 from desktop_update import UpdateDialog
@@ -192,6 +192,85 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(self.backend.state()["assignments"], [])
         self.assertIn("실수령액", dialog.error.text())
         dialog.deleteLater()
+
+    def test_fee_summary_month_year_custom_range_and_cumulative_totals(self):
+        for day, fee, net_fee in (("2025-12-31",1000,900), ("2026-01-01",150000,132912),
+                                  ("2026-10-31",200000,None), ("2026-11-01",0,0), ("2027-01-01",10000,8000)):
+            save_assignment(self.backend.store.db, {"title":day, "start_date":day, "fee":fee, "net_fee":net_fee})
+        self.window.refresh(force=True)
+        self.window.nav.setCurrentRow(1)
+        page = self.window.schedule_page
+        page.tabs.setCurrentIndex(2)
+        summary = page.fee_summary
+        self.assertIs(page.views.currentWidget(), summary)
+        self.assertTrue(page.detail_panel.isHidden())
+        self.assertTrue(page.status_filter.isHidden())
+        summary.month_year.setValue(2026)
+        summary.month.setCurrentIndex(summary.month.findData(10))
+        self.assertEqual(summary.table.item(0,1).text(), "200,000원")
+        self.assertEqual(summary.table.item(1,1).text(), "200,000원")
+        self.assertEqual(summary.table.item(1,2).text(), "1건")
+        self.assertEqual(summary.table.item(1,3).text(), "0건")
+        summary.year.setValue(2026)
+        summary.mode.setCurrentIndex(summary.mode.findData("year"))
+        self.assertEqual(summary.table.item(0,1).text(), "350,000원")
+        self.assertEqual(summary.table.item(1,1).text(), "332,912원")
+        summary.mode.setCurrentIndex(summary.mode.findData("range"))
+        summary.start.setDate(QDate(2026,10,31))
+        summary.end.setDate(QDate(2026,11,1))
+        self.assertEqual(summary.table.item(0,1).text(), "200,000원")
+        self.assertEqual(summary.table.item(1,1).text(), "200,000원")
+        self.assertIn("2026-10-31 ~ 2026-11-01", summary.period_label.text())
+        self.window.set_month(2030,12)
+        self.assertEqual(summary.start.date(), QDate(2026,10,31))
+        summary.mode.setCurrentIndex(summary.mode.findData("all"))
+        self.assertEqual(summary.table.item(0,1).text(), "361,000원")
+        self.assertEqual(summary.table.item(1,1).text(), "341,812원")
+        page.status_filter.setCurrentIndex(page.status_filter.findData("completed"))
+        self.assertEqual(page.timeline.rowCount(), 0)
+        self.assertIs(page.views.currentWidget(), summary)
+        self.assertEqual(summary.table.item(0,1).text(), "361,000원")
+        page.tabs.setCurrentIndex(0)
+        self.assertIs(page.views.currentWidget(), page.empty)
+        self.assertFalse(page.status_filter.isHidden())
+
+    def test_fee_summary_empty_period_edits_archives_and_date_limits(self):
+        page = self.window.schedule_page
+        page.tabs.setCurrentIndex(2)
+        summary = page.fee_summary
+        summary.mode.setCurrentIndex(summary.mode.findData("all"))
+        self.assertIs(page.views.currentWidget(), summary)
+        self.assertEqual(summary.table.item(0,1).text(), "0원")
+        self.assertEqual(summary.table.item(1,1).text(), "0원")
+        payload = {"title":"합계 갱신", "start_date":"2026-10-01", "fee":150000, "net_fee":132912}
+        assignment_id = save_assignment(self.backend.store.db, payload)
+        self.window.refresh(force=True)
+        self.assertEqual(summary.table.item(1,1).text(), "132,912원")
+        save_assignment(self.backend.store.db, {**payload, "id":assignment_id, "net_fee":0})
+        self.window.refresh(force=True)
+        self.assertEqual(summary.table.item(1,1).text(), "0원")
+        self.assertEqual(summary.table.item(1,2).text(), "0건")
+        save_assignment(self.backend.store.db, {**payload, "id":assignment_id, "net_fee":None})
+        self.window.refresh(force=True)
+        self.assertEqual(summary.table.item(1,1).text(), "150,000원")
+        self.assertEqual(summary.table.item(1,2).text(), "1건")
+        archive_assignment(self.backend.store.db, assignment_id)
+        self.window.refresh(force=True)
+        self.assertEqual(summary.table.item(0,1).text(), "0원")
+        self.assertEqual(summary.table.item(1,2).text(), "0건")
+        self.assertEqual(summary.mode.currentData(), "all")
+        summary.mode.setCurrentIndex(summary.mode.findData("month"))
+        summary.month_year.setValue(2028)
+        summary.month.setCurrentIndex(summary.month.findData(2))
+        self.assertIn("2028-02-29", summary.period_label.text())
+        summary.month_year.setValue(9999)
+        summary.month.setCurrentIndex(summary.month.findData(12))
+        self.assertIn("9999-12-31", summary.period_label.text())
+        summary.mode.setCurrentIndex(summary.mode.findData("range"))
+        summary.start.setDate(QDate(2027,1,1))
+        self.assertGreaterEqual(summary.end.date(), summary.start.date())
+        summary.end.setDate(QDate(2026,1,1))
+        self.assertLessEqual(summary.start.date(), summary.end.date())
 
     def test_timeline_and_six_status_changes_persist(self):
         self.backend.command("assignments", {"title":"표지 작업", "client":"테스트 의뢰인", "start_date":"2026-10-01", "due_date":"2026-11-02", "fee":500000})

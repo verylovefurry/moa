@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from desktop_dialogs import AssignmentDialog, muted_label
+from desktop_finances import FeeSummary
 from desktop_widgets import RecordDelegate, prepare_table
 from schedules import STATUSES, STATUS_LABELS, STATUS_COLORS, assignment_period, fee_text
 from tracker import KST
@@ -185,6 +186,8 @@ class SchedulePage(QWidget):
         self.tabs.setExpanding(False)
         self.tabs.addTab("타임라인")
         self.tabs.addTab("목록")
+        self.tabs.addTab("금액 합계")
+        self.calendar_controls = (previous, self.month_button, following, today_button)
         toolbar.addWidget(self.tabs)
         layout.addLayout(toolbar)
         self.count_label = muted_label("")
@@ -221,10 +224,12 @@ class SchedulePage(QWidget):
         self.list.itemSelectionChanged.connect(lambda: self.select_row(self.list))
         self.list.itemDoubleClicked.connect(lambda item: self.edit_assignment() if item.column() != 6 else None)
         self.views.addWidget(self.list)
+        self.fee_summary = FeeSummary(self.snapshot["today"])
+        self.views.addWidget(self.fee_summary)
         self.empty = muted_label("이달 일정 없음")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.views.addWidget(self.empty)
-        self.tabs.currentChanged.connect(lambda index: self.views.setCurrentIndex(index if self.ids else 2))
+        self.tabs.currentChanged.connect(self.update_view)
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)
         self.views.setMinimumHeight(170)
@@ -317,6 +322,14 @@ class SchedulePage(QWidget):
         today = date.fromisoformat(self.snapshot["today"])
         self.month_requested.emit(today.year, today.month)
 
+    def update_view(self):
+        summary = self.tabs.currentIndex() == 2
+        for control in (*self.calendar_controls, self.status_filter, self.count_label):
+            control.setVisible(not summary)
+        self.detail_panel.setVisible(not summary and self.selected_id is not None)
+        view = (self.timeline, self.list, self.fee_summary)[self.tabs.currentIndex()]
+        self.views.setCurrentWidget(view if summary or self.ids else self.empty)
+
     def visible_assignments(self):
         first = date(self.year, self.month, 1)
         last = date(self.year, self.month, calendar.monthrange(self.year, self.month)[1])
@@ -340,6 +353,7 @@ class SchedulePage(QWidget):
         if not force and signature == self._data_signature:
             return
         self._data_signature = signature
+        self.fee_summary.set_assignments(snapshot["assignments"])
         values = self.visible_assignments()
         self.ids = [item["id"] for item in values]
         if self.selected_id not in self.ids:
@@ -393,7 +407,7 @@ class SchedulePage(QWidget):
         for table in (self.timeline, self.list):
             table.blockSignals(False)
         self.count_label.setText(f"이달 일정 {len(values)}개 · 미완료 {sum(item['status'] != 'completed' for item in values)}개")
-        self.views.setCurrentIndex(self.tabs.currentIndex() if values else 2)
+        self.update_view()
         self.edit_button.setEnabled(bool(values))
         self.delete_button.setEnabled(bool(values))
         self.update_detail()
@@ -415,7 +429,7 @@ class SchedulePage(QWidget):
         item = self.selected_assignment()
         self.edit_button.setEnabled(item is not None)
         self.delete_button.setEnabled(item is not None)
-        self.detail_panel.setVisible(item is not None)
+        self.detail_panel.setVisible(item is not None and self.tabs.currentIndex() != 2)
         if not item:
             self.detail_title.clear()
             self.detail_status.clear()

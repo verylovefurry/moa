@@ -142,6 +142,26 @@ def fee_text(value):
     return "—" if value is None else f"{value:,}원"
 
 
+def assignment_totals(assignments, start=None, end=None):
+    """Sum entered amounts once per assignment, using inclusive start-date bounds."""
+    if start is not None and end is not None and start > end:
+        raise ValueError("종료일은 시작일보다 빠를 수 없습니다.")
+    totals = {"count": 0, "fee": 0, "net_fee": 0, "fee_entered": 0, "net_fee_entered": 0, "net_fee_fallback": 0}
+    for item in assignments:
+        if item.get("archived") or (start is not None and item["start_date"] < start) or (end is not None and item["start_date"] > end):
+            continue
+        totals["count"] += 1
+        for key in ("fee", "net_fee"):
+            amount = item.get(key)
+            if amount is not None:
+                totals[key] += amount
+                totals[key + "_entered"] += 1
+        if item.get("net_fee") is None and item.get("fee") is not None:
+            totals["net_fee"] += item["fee"]
+            totals["net_fee_fallback"] += 1
+    return totals
+
+
 def assignment_period(item):
     start = date.fromisoformat(item["start_date"])
     return start, date.fromisoformat(item["due_date"]) if item["due_date"] else start
