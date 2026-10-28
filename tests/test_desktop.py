@@ -1,5 +1,6 @@
 """Offscreen integration checks. These only use temporary desktop databases."""
 import csv
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -8,13 +9,14 @@ from unittest.mock import patch, Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QDate, QEvent, QPoint, QPointF, QTime, Qt
+from PySide6.QtCore import QCoreApplication, QDate, QEvent, QPoint, QPointF, QSize, QTime, Qt
 from PySide6.QtGui import QFontDatabase, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog
 from desktop import MoaWindow, configure_application, parse_arguments
 from desktop_backend import DesktopBackend, migrate_legacy_database
 from desktop_dialogs import AssignmentDialog, MonthDialog, SettingsDialog, TargetDialog
+from desktop_icons import ASSET_DIRECTORY, ICON_NAMES, ui_icon
 from schedules import STATUSES, archive_assignment, change_assignment_status, save_assignment
 from tracker import Store
 from tests.fixtures import seed_test_store
@@ -521,6 +523,33 @@ class DesktopTests(unittest.TestCase):
         self.assertGreaterEqual(self.window.calendar.width(), 470)
         self.assertGreaterEqual(self.window.live_clock.width(), 100)
         self.assertGreaterEqual(self.window.day_table.width(), 285)
+
+    def test_bundled_icons_render_at_matching_display_sizes_and_densities(self):
+        manifest = json.loads((ASSET_DIRECTORY / "source.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(manifest["icons"]), set(ICON_NAMES))
+        self.assertIn("MIT License", (ASSET_DIRECTORY / "LICENSE").read_text(encoding="utf-8"))
+        for name in ICON_NAMES:
+            for density in (1.0, 1.5, 2.0, 3.0):
+                with self.subTest(icon=name, density=density):
+                    pixmap = ui_icon(name).pixmap(QSize(16,16), density)
+                    self.assertFalse(pixmap.isNull())
+                    self.assertEqual(pixmap.size(), QSize(round(16*density),round(16*density)))
+                    self.assertEqual(pixmap.devicePixelRatio(), density)
+                    rendered = pixmap.toImage()
+                    self.assertTrue(any(rendered.pixelColor(x,y).alpha() for y in range(rendered.height()) for x in range(rendered.width())))
+
+    def test_tracking_controls_remain_available_on_every_page(self):
+        for page in range(4):
+            self.window.nav.setCurrentRow(page)
+            self.app.processEvents()
+            self.assertTrue(self.window.live_clock.isVisible())
+            self.assertTrue(self.window.tracking_button.isVisible())
+            self.assertTrue(self.window.tracking_status.isVisible())
+        self.window.tracking_button.click()
+        self.assertTrue(self.backend.state()["tracker"]["enabled"])
+        self.assertEqual(self.window.tracking_button.text(), "추적 일시정지")
+        self.window.tracking_button.click()
+        self.assertFalse(self.backend.state()["tracker"]["enabled"])
 
 
 class MigrationTests(unittest.TestCase):

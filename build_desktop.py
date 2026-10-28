@@ -45,6 +45,7 @@ def main():
         "--distpath", str(destination), "--workpath", str(root / "output" / "build"),
         "--specpath", str(root / "output"),
         "--add-data", f"{root / 'browser-extension'};browser-extension",
+        "--add-data", f"{root / 'assets' / 'reicon'};assets/reicon",
         "--add-data", f"{build_info};.",
         "--exclude-module", "PySide6.QtWebEngineCore",
         "--exclude-module", "PySide6.QtWebEngineWidgets",

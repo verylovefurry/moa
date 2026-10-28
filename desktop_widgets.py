@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date, timedelta
+from math import ceil
 
 from PySide6.QtCore import Qt, QRect, QRectF, QSize, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
@@ -12,11 +13,8 @@ from PySide6.QtWidgets import (
 )
 
 from desktop_backend import format_duration
+from desktop_theme import GREEN, TEXT, MUTED, LINE
 
-GREEN = "#365f4c"
-TEXT = "#26332e"
-MUTED = "#66736b"
-LINE = "#dfe4e1"
 DAY_ROLE = Qt.ItemDataRole.UserRole + 1
 PAYLOAD_ROLE = Qt.ItemDataRole.UserRole + 2
 
@@ -130,7 +128,14 @@ class CalendarDelegate(QStyledItemDelegate):
             painter.setPen(QColor(TEXT if not outside else MUTED))
             total_rect = QRect(left, top + 31, rect.width() - 20, 21)
             total_text = format_duration(day["total"])
-            painter.drawText(total_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, painter.fontMetrics().elidedText(total_text, Qt.TextElideMode.ElideRight, total_rect.width()))
+            if painter.fontMetrics().horizontalAdvance(total_text) > total_rect.width():
+                hours, minutes = divmod(max(0, int(day["total"])) // 60, 60)
+                total_text = f"{hours}시간{minutes}분" if hours and minutes else f"{hours}시간" if hours else f"{minutes}분"
+                font.setPointSizeF(8.5)
+                painter.setFont(font)
+                if painter.fontMetrics().horizontalAdvance(total_text) > total_rect.width():
+                    total_text = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+            painter.drawText(total_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, total_text)
             if rect.height() >= 92:
                 font.setPointSizeF(8)
                 font.setWeight(QFont.Weight.Normal)
@@ -229,17 +234,18 @@ class RecordDelegate(QStyledItemDelegate):
         painter.setClipRect(option.rect)
         text, _, secondary = str(index.data() or "").partition("\n")
         rect = option.rect.adjusted(10, 5, -8, -4)
-        color = index.data(Qt.ItemDataRole.ForegroundRole)
+        alignment = Qt.AlignmentFlag.AlignRight if (index.data(Qt.ItemDataRole.TextAlignmentRole) or 0) & Qt.AlignmentFlag.AlignRight else Qt.AlignmentFlag.AlignLeft
+        alignment |= Qt.AlignmentFlag.AlignVCenter
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         painter.setPen(QColor(TEXT) if not selected else option.palette.highlightedText().color())
         font = QFont(option.font)
         font.setWeight(QFont.Weight.Normal)
         painter.setFont(font)
-        painter.drawText(QRect(rect.left(), rect.top(), rect.width(), 22), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, rect.width()))
-        font.setPointSizeF(8)
+        painter.drawText(QRect(rect.left(), rect.top(), rect.width(), 22), alignment, painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, rect.width()))
+        font.setPointSizeF(8.5)
         painter.setFont(font)
         painter.setPen(QColor(MUTED) if not selected else option.palette.highlightedText().color())
-        painter.drawText(QRect(rect.left(), rect.top() + 23, rect.width(), 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, painter.fontMetrics().elidedText(secondary, Qt.TextElideMode.ElideRight, rect.width()))
+        painter.drawText(QRect(rect.left(), rect.top() + 23, rect.width(), 18), alignment, painter.fontMetrics().elidedText(secondary, Qt.TextElideMode.ElideRight, rect.width()))
         painter.setPen(QColor("#edf0ee"))
         painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
         painter.restore()
@@ -260,7 +266,8 @@ class DailyChart(QWidget):
 
     def set_data(self, year, month, daily, today):
         self.values = [(date(year, month, number).isoformat(), daily.get(date(year, month, number).isoformat(), {}).get("total", 0)) for number in range(1, calendar.monthrange(year, month)[1] + 1)]
-        self.maximum = max(8 * 3600, *(seconds for _, seconds in self.values))
+        peak = max(8 * 3600, *(seconds for _, seconds in self.values))
+        self.maximum = ceil(peak / (4 * 3600)) * (4 * 3600)
         self.today = today
         self.update()
 

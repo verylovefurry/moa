@@ -5,7 +5,7 @@ import calendar
 from datetime import date
 
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QComboBox, QDateEdit, QHeaderView, QHBoxLayout, QLabel, QSpinBox,
     QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from desktop_dialogs import muted_label
 from desktop_widgets import prepare_table
+from desktop_theme import MUTED
 from schedules import assignment_totals, fee_text
 
 
@@ -80,6 +81,8 @@ class FeeSummary(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(2, 112)
         self.table.setColumnWidth(3, 112)
+        for column in (1, 2, 3):
+            self.table.horizontalHeaderItem(column).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.table.verticalHeader().setDefaultSectionSize(48)
         self.table.setFixedHeight(150)
         layout.addWidget(self.table)
@@ -156,9 +159,11 @@ class FeeSummary(QWidget):
                 item.setToolTip(value)
                 if column > 0:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                if column > 1:
+                    item.setForeground(QColor(MUTED))
                 if column == 1:
                     font = QFont(self.table.font())
-                    font.setPointSizeF(12)
-                    font.setWeight(QFont.Weight.DemiBold)
+                    font.setPointSizeF(14 if key == "net_fee" else 11)
+                    font.setWeight(QFont.Weight.DemiBold if key == "net_fee" else QFont.Weight.Normal)
                     item.setFont(font)
                 self.table.setItem(row, column, item)

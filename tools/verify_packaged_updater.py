@@ -14,6 +14,9 @@ import tempfile
 import socket
 import time
 from urllib.request import urlopen
+from xml.etree import ElementTree
+
+from PyInstaller.archive.readers import CArchiveReader
 
 ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT))
@@ -24,6 +27,14 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--exe",type=Path,default=ROOT/"release"/"Moa.exe")
     args=parser.parse_args()
+    archive=CArchiveReader(str(args.exe))
+    resources={name.replace("\\","/"):name for name in archive.toc}
+    manifest=json.loads(archive.extract(resources["assets/reicon/source.json"]))
+    assert b"MIT License" in archive.extract(resources["assets/reicon/LICENSE"])
+    for name in manifest["icons"]:
+        svg=ElementTree.fromstring(archive.extract(resources[f"assets/reicon/{name}.svg"]))
+        assert svg.attrib["viewBox"]=="0 0 24 24"
+    print(f"Packaged icon assets passed: {len(manifest['icons'])} local SVGs, manifest and MIT license.")
     output=(ROOT/"output").resolve()
     output.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="packaged-update-",dir=output) as directory:

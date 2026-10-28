@@ -27,12 +27,14 @@ from PySide6.QtWidgets import (
     QLabel, QLayout, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
     QStyleFactory, QSystemTrayIcon, QTabBar, QTableWidget, QTableWidgetItem,
-    QToolBar, QToolButton, QVBoxLayout, QWidget, QComboBox,
+    QToolButton, QVBoxLayout, QWidget, QComboBox,
 )
 
 from desktop_backend import DesktopBackend, desktop_data_directory, format_clock, format_duration, format_time
 from desktop_dialogs import ConnectionDialog, HelpDialog, MonthDialog, SettingsDialog, TargetDialog, muted_label
 from desktop_schedule import SchedulePage
+from desktop_icons import ui_icon
+from desktop_theme import STYLE, PAGE_MARGINS, PAGE_SPACING, ICON_SIZE
 from startup import startup_manager_for_run, startup_disabled_reason, is_test_build
 from desktop_update import UpdateController
 from updates import cached_update, launch_installer, UpdateError
@@ -41,34 +43,6 @@ from desktop_widgets import DAY_ROLE, GREEN, LINE, TEXT, DailyChart, RecordDeleg
 from tracker import KST, split_by_day
 
 WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
-
-STYLE = """
-QMainWindow, QDialog { background: #ffffff; }
-QPushButton { min-height: 24px; padding: 2px 10px; }
-QComboBox, QLineEdit, QDateEdit, QTimeEdit, QSpinBox { min-height: 24px; }
-QLabel[muted="true"] { color: #66736b; }
-QWidget#navigationPane { background: #f4f6f5; border-right: 1px solid #dfe4e1; }
-QListWidget#navigation { border: 0; background: transparent; outline: 0; }
-QListWidget#navigation::item { padding: 8px 11px; border: 0; color: #47564e; }
-QListWidget#navigation::item:selected { background: #dfe9e2; color: #274c38; }
-QListWidget#navigation::item:hover:!selected { background: #e9eeea; }
-QToolBar { background: #ffffff; border: 0; border-bottom: 1px solid #dfe4e1; spacing: 10px; padding: 8px 16px; }
-QPushButton#trackingButton { background: #365f4c; color: #ffffff; border: 1px solid #365f4c; border-radius: 4px; padding: 6px 14px; min-height: 18px; }
-QPushButton#trackingButton:hover { background: #2b4f3e; }
-QPushButton#trackingButton:focus { border: 2px solid #839d8d; padding: 5px 13px; }
-QPushButton#trackingButton[tracking="true"] { background: #ffffff; color: #365f4c; border-color: #a4b4aa; }
-QTableWidget { background: #ffffff; border: 1px solid #dfe4e1; selection-background-color: #e4eee7; selection-color: #243f2f; }
-QHeaderView::section { background: #f5f7f5; color: #637167; border: 0; border-bottom: 1px solid #dfe4e1; padding: 7px 9px; }
-QTableWidget#workCalendar QHeaderView::section { padding: 5px 0; }
-QTableWidget::item { padding-left: 9px; padding-right: 9px; }
-QProgressBar { background: #e7ece8; border: 0; max-height: 5px; min-height: 5px; }
-QProgressBar::chunk { background: #7f9d88; }
-QSplitter::handle:horizontal { background: #ffffff; width: 13px; }
-QStatusBar { background: #f7f8f7; border-top: 1px solid #e1e6e2; color: #66736b; }
-QStatusBar::item { border: 0; }
-QFrame[divider="true"] { color: #e0e5e1; }
-"""
-
 
 def divider():
     line = QFrame()
@@ -108,12 +82,11 @@ class MoaWindow(QMainWindow):
         self._closing = False
         self._target_ids = []
         self._record_ids = []
-        self.setWindowTitle("작업 시간과 일정")
+        self.setWindowTitle("모아 — 작업 시간과 일정")
         self.setWindowIcon(app_icon())
         self.setMinimumSize(1050, 720)
         self.resize(1270, 820)
         self.build_menu()
-        self.build_toolbar()
         self.build_body()
         self.build_tray()
         self.status_text = QLabel("추적 중지")
@@ -169,21 +142,27 @@ class MoaWindow(QMainWindow):
         help_menu.addAction(self.action("업데이트 확인…", self.open_updates))
         help_menu.addAction(self.action("모아 정보", lambda: QMessageBox.about(self, "모아 정보", f"모아 {APP_VERSION}\n자동 작업 시간 기록 · 의뢰와 일정 관리")))
 
-    def build_toolbar(self):
-        toolbar = QToolBar("기록 도구", self)
-        toolbar.setMovable(False)
-        toolbar.setFloatable(False)
-        self.addToolBar(toolbar)
+    def build_tracking_controls(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(2, 12, 2, 12)
+        layout.setSpacing(8)
+        self.tracking_status = muted_label("추적 중지")
+        layout.addWidget(self.tracking_status)
+        self.live_clock = QLabel("00:00:00")
+        self.live_clock.setFont(QFont("Consolas", 18))
+        self.live_clock.setAccessibleName("자동 감지된 현재 기록 구간 시간")
+        layout.addWidget(self.live_clock)
+        self.live_caption = muted_label("")
+        self.live_caption.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.live_caption.setMaximumHeight(40)
+        layout.addWidget(self.live_caption)
         self.tracking_button = button("자동 추적 시작", self.toggle_tracking, "Ctrl+R")
         self.tracking_button.setObjectName("trackingButton")
         self.tracking_button.setAccessibleName("자동 추적 시작 또는 일시정지")
-        toolbar.addWidget(self.tracking_button)
-        self.tracking_status = muted_label("추적 중지")
-        self.tracking_status.setMinimumWidth(170)
-        toolbar.addWidget(self.tracking_status)
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(spacer)
+        self.tracking_button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        layout.addWidget(self.tracking_button)
+        return panel
 
     def build_body(self):
         root = QWidget()
@@ -192,27 +171,37 @@ class MoaWindow(QMainWindow):
         root_layout.setSpacing(0)
         sidebar = QWidget()
         sidebar.setObjectName("navigationPane")
-        sidebar.setFixedWidth(148)
+        sidebar.setFixedWidth(176)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(12, 22, 12, 15)
+        side.setContentsMargins(12, 20, 12, 14)
         side.setSpacing(8)
-        brand = heading("모아", 18)
-        brand.setContentsMargins(10, 0, 0, 0)
-        side.addWidget(brand)
-        side.addSpacing(18)
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(8, 0, 0, 0)
+        brand_icon = QLabel()
+        brand_icon.setPixmap(app_icon().pixmap(24, 24))
+        brand_row.addWidget(brand_icon)
+        brand_row.addWidget(heading("모아", 15), 1)
+        side.addLayout(brand_row)
+        side.addSpacing(20)
         self.nav = QListWidget()
         self.nav.setObjectName("navigation")
         self.nav.setAccessibleName("화면 선택")
         self.nav.setSpacing(2)
-        self.nav.setMaximumHeight(176)
-        for name in ("작업 달력", "일정 관리", "시간 통계", "추적 대상"):
-            item = QListWidgetItem(name)
-            item.setSizeHint(QSize(112, 35))
+        self.nav.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        self.nav.setMaximumHeight(180)
+        for name, icon in (("작업 달력", "calendar"), ("일정 관리", "tasks"), ("시간 통계", "chart"), ("추적 대상", "display")):
+            item = QListWidgetItem(ui_icon(icon), name)
+            item.setSizeHint(QSize(144, 38))
             self.nav.addItem(item)
         side.addWidget(self.nav)
         side.addStretch()
+        side.addWidget(self.build_tracking_controls())
+        side.addWidget(divider())
         side.addWidget(button("브라우저 연결…", self.open_connection))
-        side.addWidget(button("설정…", self.open_settings, "Ctrl+,"))
+        settings_button = button("설정…", self.open_settings, "Ctrl+,")
+        settings_button.setIcon(ui_icon("settings"))
+        settings_button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        side.addWidget(settings_button)
         root_layout.addWidget(sidebar)
         self.pages = QStackedWidget()
         self.pages.addWidget(self.build_calendar_page())
@@ -230,30 +219,32 @@ class MoaWindow(QMainWindow):
     def page_frame(self, title):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(23, 20, 23, 17)
-        layout.setSpacing(15)
+        layout.setContentsMargins(*PAGE_MARGINS)
+        layout.setSpacing(PAGE_SPACING)
         row = QHBoxLayout()
         row.addWidget(heading(title, 16))
         sample = QLabel("샘플 기록 포함")
         sample.setStyleSheet("color: #8b7046; font-size: 11px;")
         row.addWidget(sample)
         row.addStretch()
+        page.header_actions = row
         layout.addLayout(row)
         return page, layout, sample
 
     def summary_strip(self, layout):
         strip = QHBoxLayout()
-        strip.setSpacing(25)
+        strip.setSpacing(24)
         labels = []
-        for text in ("이달 누적", "이번 주", "하루 평균", "기록한 날"):
+        for index, text in enumerate(("이달 누적", "이번 주", "하루 평균", "기록한 날")):
             column = QVBoxLayout()
             column.setSpacing(5)
             caption = muted_label(text)
             value = QLabel("—")
-            value.setFont(QFont(QApplication.font().family(), 15, QFont.Weight.DemiBold))
+            value.setFont(QFont(QApplication.font().family(), 17 if index == 0 else 12, QFont.Weight.DemiBold))
+            value.setMinimumHeight(30)
             column.addWidget(caption)
             column.addWidget(value)
-            strip.addLayout(column, 1)
+            strip.addLayout(column, 2 if index == 0 else 1)
             labels.append((caption, value))
         layout.addLayout(strip)
         layout.addWidget(divider())
@@ -262,14 +253,20 @@ class MoaWindow(QMainWindow):
     def month_controls(self, layout):
         row = QHBoxLayout()
         row.setSpacing(7)
-        previous = button("‹", lambda: self.change_month(-1), "이전 달 · Alt+Left")
+        previous = button("", lambda: self.change_month(-1), "이전 달 · Alt+Left")
+        previous.setIcon(ui_icon("previous"))
+        previous.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        previous.setProperty("monthNavigation", True)
         previous.setAccessibleName("이전 달")
-        previous.setFixedWidth(29)
-        following = button("›", lambda: self.change_month(1), "다음 달 · Alt+Right")
+        previous.setFixedWidth(30)
+        following = button("", lambda: self.change_month(1), "다음 달 · Alt+Right")
+        following.setIcon(ui_icon("next"))
+        following.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        following.setProperty("monthNavigation", True)
         following.setAccessibleName("다음 달")
-        following.setFixedWidth(29)
+        following.setFixedWidth(30)
         label = QPushButton()
-        label.setMinimumWidth(136)
+        label.setMinimumWidth(128)
         label.setObjectName("monthPicker")
         label.setToolTip("Ctrl+L")
         label.setAccessibleName("연·월 바로 이동")
@@ -284,6 +281,7 @@ class MoaWindow(QMainWindow):
 
     def build_calendar_page(self):
         page, layout, self.calendar_sample = self.page_frame("작업 달력")
+        page.header_actions.addWidget(button("CSV 내보내기…", self.export_csv))
         self.calendar_summary = self.summary_strip(layout)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -317,10 +315,6 @@ class MoaWindow(QMainWindow):
         self.calendar_views.addWidget(self.month_list)
         self.calendar_tabs.currentChanged.connect(self.calendar_views.setCurrentIndex)
         content.addWidget(self.calendar_views, 1)
-        foot = QHBoxLayout()
-        foot.addStretch()
-        foot.addWidget(button("CSV 내보내기…", self.export_csv))
-        content.addLayout(foot)
         splitter.addWidget(left)
         splitter.addWidget(self.build_day_panel())
         splitter.setStretchFactor(0, 3)
@@ -334,7 +328,7 @@ class MoaWindow(QMainWindow):
         panel = QWidget()
         panel.setMinimumWidth(300)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(4, 2, 0, 0)
+        layout.setContentsMargins(8, 0, 0, 0)
         layout.setSpacing(11)
         self.day_heading = heading("", 12)
         layout.addWidget(self.day_heading)
@@ -362,7 +356,8 @@ class MoaWindow(QMainWindow):
         self.day_table.setItemDelegate(RecordDelegate(self.day_table))
         self.day_table.verticalHeader().setDefaultSectionSize(58)
         self.day_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.day_table.setColumnWidth(1, 103)
+        self.day_table.setColumnWidth(1, 110)
+        self.day_table.horizontalHeaderItem(1).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.day_table, 1)
         self.day_empty = muted_label("기록 없음")
         self.day_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -376,23 +371,14 @@ class MoaWindow(QMainWindow):
         self.excluded_label.setStyleSheet("color: #8b7046;")
         self.excluded_label.hide()
         layout.addWidget(self.excluded_label)
-        layout.addSpacing(5)
-        layout.addWidget(divider())
-        layout.addWidget(heading("현재 자동 기록", 10))
-        self.live_clock = QLabel("00:00:00")
-        self.live_clock.setFont(QFont("Consolas", 22))
-        self.live_clock.setAccessibleName("자동 감지된 현재 기록 구간 시간")
-        layout.addWidget(self.live_clock)
-        self.live_caption = muted_label("추적 대기")
-        layout.addWidget(self.live_caption)
         return panel
 
     def build_stats_page(self):
         page, layout, self.stats_sample = self.page_frame("시간 통계")
+        page.header_actions.addWidget(button("CSV 내보내기…", self.export_csv))
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.stats_summary = self.summary_strip(layout)
         row, self.stats_month = self.month_controls(layout)
-        row.addWidget(button("CSV 내보내기…", self.export_csv))
         self.stats_chart_heading = heading("일별 작업 시간", 11)
         layout.addWidget(self.stats_chart_heading)
         self.chart = DailyChart()
@@ -405,6 +391,8 @@ class MoaWindow(QMainWindow):
         self.stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.stats_table.setColumnWidth(1, 160)
         self.stats_table.setColumnWidth(2, 95)
+        for column in (1, 2):
+            self.stats_table.horizontalHeaderItem(column).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.stats_table.setMinimumHeight(160)
         layout.addWidget(self.stats_table, 2)
         scroll = QScrollArea()
@@ -416,12 +404,15 @@ class MoaWindow(QMainWindow):
 
     def build_targets_page(self):
         page, layout, self.targets_sample = self.page_frame("추적 대상")
+        add_button = button("추가…", self.add_target, "Ctrl+Shift+N")
+        add_button.setProperty("primary", True)
+        page.header_actions.addWidget(add_button)
         row = QHBoxLayout()
         self.target_count = muted_label("")
         row.addWidget(self.target_count, 1)
-        row.addWidget(button("추가…", self.add_target, "Ctrl+Shift+N"))
         self.edit_target_button = button("편집…", self.edit_target)
         self.delete_target_button = button("삭제", self.delete_target)
+        self.delete_target_button.setProperty("destructive", True)
         self.edit_target_button.setEnabled(False)
         self.delete_target_button.setEnabled(False)
         row.addWidget(self.edit_target_button)
@@ -435,6 +426,7 @@ class MoaWindow(QMainWindow):
         self.targets_table.setColumnWidth(1, 210)
         self.targets_table.setColumnWidth(2, 95)
         self.targets_table.setColumnWidth(4, 115)
+        self.targets_table.horizontalHeaderItem(4).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.targets_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.targets_table.itemSelectionChanged.connect(self.target_selection_changed)
         self.targets_table.itemDoubleClicked.connect(lambda item: self.edit_target() if item.column() != 0 else None)
@@ -562,6 +554,7 @@ class MoaWindow(QMainWindow):
             table.setItem(row, 0, first)
             table.setItem(row, 1, QTableWidgetItem(", ".join(names.get(tid, {}).get("name", "작업") for tid in data["targets"])))
             table.setItem(row, 2, QTableWidgetItem(format_duration(data["total"])))
+            table.item(row, 2).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if key == self.selected:
                 table.selectRow(row)
         table.blockSignals(False)
@@ -595,6 +588,7 @@ class MoaWindow(QMainWindow):
                 source = "추정 복원 포함"
                 item.setToolTip(item.toolTip() + f"\n추정 복원 포함: {format_duration(entry['recovered_seconds'], precise=True)}")
             second = QTableWidgetItem(f"{format_duration(clipped_end - clipped_start, precise=True)}\n{source}")
+            second.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.day_table.setItem(row, 1, second)
             if entry["id"] == old_selection:
                 self.day_table.selectRow(row)
@@ -633,6 +627,7 @@ class MoaWindow(QMainWindow):
             table.setItem(row, 3, matcher)
             seconds = sum(day["targets"].get(target["id"], 0) for _, day in self.month_days())
             table.setItem(row, 4, QTableWidgetItem(format_duration(seconds)))
+            table.item(row, 4).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if target["id"] == previous:
                 table.selectRow(row)
         table.blockSignals(False)
@@ -649,6 +644,8 @@ class MoaWindow(QMainWindow):
             self.stats_table.setItem(row, 0, QTableWidgetItem(color_icon(target["color"]), target["name"]))
             self.stats_table.setItem(row, 1, QTableWidgetItem(format_duration(seconds)))
             self.stats_table.setItem(row, 2, QTableWidgetItem(f"{round(seconds / total * 100)}%" if total else "0%"))
+            for column in (1, 2):
+                self.stats_table.item(row, column).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
     def update_tracking(self):
         tracker = self.snapshot["tracker"]
@@ -657,11 +654,13 @@ class MoaWindow(QMainWindow):
         if tracker["enabled"] and not any(not target["archived"] for target in self.snapshot["targets"]):
             status = "추적 대상 없음"
         active = self.target_map().get(tracker["active"], {}).get("name")
-        self.tracking_status.setText(status + (f" · {active}" if active else ""))
+        self.tracking_status.setText(status)
         label = "추적 일시정지" if tracker["enabled"] else "자동 추적 시작"
         self.tracking_button.setText(label)
+        self.tracking_button.setIcon(ui_icon("pause" if tracker["enabled"] else "play", TEXT if tracker["enabled"] else "#ffffff"))
         if self.tracking_button.property("tracking") != tracker["enabled"]:
             self.tracking_button.setProperty("tracking", tracker["enabled"])
+            self.tracking_button.setProperty("primary", not tracker["enabled"])
             self.tracking_button.style().unpolish(self.tracking_button)
             self.tracking_button.style().polish(self.tracking_button)
         self.tracking_action.setText(label)
@@ -670,7 +669,9 @@ class MoaWindow(QMainWindow):
         self.idle_status.setText(f"자리 비움 {self.snapshot['settings']['idle_minutes']}분   ")
         elapsed = self.snapshot["now"] - tracker["session_start"] if tracker["status"] in ("recording", "continuing") and tracker["session_start"] else 0
         self.live_clock.setText(format_clock(elapsed))
-        self.live_caption.setText("자리 비움" if tracker["status"] == "away" else active or status)
+        self.live_caption.setText(active or "")
+        self.live_caption.setToolTip(active or "")
+        self.live_caption.setVisible(bool(active))
         connected = tracker["browser_connected"]
         self.connection_status.setText("URL 감지: 브라우저 연결됨" if connected else "URL 감지: 브라우저 확장 연결 필요")
         today_total = self.snapshot["daily"].get(self.snapshot["today"], {}).get("total", 0)

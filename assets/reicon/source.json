@@ -1,0 +1,53 @@
+{
+  "source": "https://github.com/dqev/reicon",
+  "commit": "fe6975391b80c808c25d98b2a21081cf180482f9",
+  "style": "Outline",
+  "viewBox": "0 0 24 24",
+  "icons": {
+    "calendar": {
+      "category": "time",
+      "name": "calendar",
+      "weight": "Outline"
+    },
+    "tasks": {
+      "category": "ui",
+      "name": "tasks",
+      "weight": "Outline"
+    },
+    "chart": {
+      "category": "business",
+      "name": "chart-bar",
+      "weight": "Outline"
+    },
+    "display": {
+      "category": "devices",
+      "name": "display",
+      "weight": "Outline"
+    },
+    "settings": {
+      "category": "settings",
+      "name": "settings2",
+      "weight": "Outline"
+    },
+    "previous": {
+      "category": "arrows",
+      "name": "arrow-left2",
+      "weight": "Outline"
+    },
+    "next": {
+      "category": "arrows",
+      "name": "arrow-right2",
+      "weight": "Outline"
+    },
+    "play": {
+      "category": "video",
+      "name": "play",
+      "weight": "Outline"
+    },
+    "pause": {
+      "category": "video",
+      "name": "pause",
+      "weight": "Outline"
+    }
+  }
+}

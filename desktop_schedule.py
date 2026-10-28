@@ -4,7 +4,7 @@ from __future__ import annotations
 import calendar
 from datetime import date, datetime
 
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+from PySide6.QtCore import Qt, QPointF, QRectF, QSize, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFormLayout, QFrame, QHeaderView, QHBoxLayout,
@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 
 from desktop_dialogs import AssignmentDialog, muted_label
 from desktop_finances import FeeSummary
+from desktop_icons import ui_icon
+from desktop_theme import PAGE_MARGINS, PAGE_SPACING, ICON_SIZE, MUTED, LINE
 from desktop_widgets import NoWheelComboBox, RecordDelegate, prepare_table
 from schedules import STATUSES, STATUS_LABELS, STATUS_COLORS, assignment_period, fee_text
 from tracker import KST
@@ -41,8 +43,8 @@ class TimelineHeader(QHeaderView):
             super().paintSection(painter, rect, index)
             return
         painter.save()
-        painter.fillRect(rect, QColor("#f5f7f5"))
-        painter.setPen(QColor("#66736b"))
+        painter.fillRect(rect, QColor("#f6f8f6"))
+        painter.setPen(QColor(MUTED))
         font = QFont(self.font())
         font.setPointSizeF(8)
         painter.setFont(font)
@@ -56,8 +58,12 @@ class TimelineHeader(QHeaderView):
             if key == self.today:
                 painter.fillRect(QRectF(x, rect.bottom() - 21, step, 21), QColor("#e0ebe3"))
             if number == 1 or number == count or (number - 1) % interval == 0:
-                painter.drawText(QRectF(x, rect.bottom() - 21, step, 20), Qt.AlignmentFlag.AlignCenter, str(number))
-        painter.setPen(QColor("#dfe4e1"))
+                if number not in (1, count) and count - number < interval:
+                    continue
+                width = max(step, painter.fontMetrics().horizontalAdvance(str(number)) + 2)
+                left = max(rect.left(), min(x + (step - width) / 2, rect.right() + 1 - width))
+                painter.drawText(QRectF(left, rect.bottom() - 21, width, 20), Qt.AlignmentFlag.AlignCenter, str(number))
+        painter.setPen(QColor(LINE))
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
         painter.restore()
 
@@ -144,31 +150,48 @@ class SchedulePage(QWidget):
         self.selected_id = None
         self._data_signature = None
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(23, 20, 23, 17)
-        layout.setSpacing(14)
+        layout.setContentsMargins(*PAGE_MARGINS)
+        layout.setSpacing(PAGE_SPACING)
+        self.tabs = QTabBar()
+        self.tabs.setExpanding(False)
+        self.tabs.addTab("타임라인")
+        self.tabs.addTab("목록")
+        self.tabs.addTab("금액 합계")
         heading = QHBoxLayout()
         heading.addWidget(title_label("일정 관리", 16))
+        heading.addSpacing(16)
+        heading.addWidget(self.tabs)
         heading.addStretch()
         self.add_button = QPushButton("새 일정…")
+        self.add_button.setProperty("primary", True)
         self.add_button.setToolTip("Ctrl+N")
         self.add_button.clicked.connect(self.add_assignment)
         heading.addWidget(self.add_button)
         layout.addLayout(heading)
         toolbar = QHBoxLayout()
-        previous = QPushButton("‹")
-        previous.setFixedWidth(29)
+        previous = QPushButton()
+        previous.setIcon(ui_icon("previous"))
+        previous.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        previous.setProperty("monthNavigation", True)
+        previous.setFixedWidth(30)
         previous.setAccessibleName("일정 이전 달")
+        previous.setToolTip("이전 달 · Alt+Left")
         previous.clicked.connect(lambda: self.move_month(-1))
         toolbar.addWidget(previous)
         self.month_button = QPushButton()
-        self.month_button.setMinimumWidth(136)
+        self.month_button.setMinimumWidth(128)
+        self.month_button.setObjectName("monthPicker")
         self.month_button.setAccessibleName("연·월 바로 이동")
         self.month_button.setToolTip("Ctrl+L")
         self.month_button.clicked.connect(lambda: self.choose_month_requested.emit())
         toolbar.addWidget(self.month_button)
-        following = QPushButton("›")
-        following.setFixedWidth(29)
+        following = QPushButton()
+        following.setIcon(ui_icon("next"))
+        following.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        following.setProperty("monthNavigation", True)
+        following.setFixedWidth(30)
         following.setAccessibleName("일정 다음 달")
+        following.setToolTip("다음 달 · Alt+Right")
         following.clicked.connect(lambda: self.move_month(1))
         toolbar.addWidget(following)
         today_button = QPushButton("이번 달")
@@ -182,13 +205,7 @@ class SchedulePage(QWidget):
             self.status_filter.addItem(label, status)
         self.status_filter.currentIndexChanged.connect(lambda: self.update_data(self.snapshot, self.year, self.month, force=True))
         toolbar.addWidget(self.status_filter)
-        self.tabs = QTabBar()
-        self.tabs.setExpanding(False)
-        self.tabs.addTab("타임라인")
-        self.tabs.addTab("목록")
-        self.tabs.addTab("금액 합계")
         self.calendar_controls = (previous, self.month_button, following, today_button)
-        toolbar.addWidget(self.tabs)
         layout.addLayout(toolbar)
         self.count_label = muted_label("")
         layout.addWidget(self.count_label)
@@ -218,6 +235,8 @@ class SchedulePage(QWidget):
         prepare_table(self.list, ["의뢰·할 일", "의뢰인", "시작일", "마감일", "의뢰비", "실수령액", "진행 상태"])
         self.list.setAccessibleName("의뢰와 할 일 목록")
         self.list.horizontalHeader().setMinimumSectionSize(108)
+        for column in (4, 5):
+            self.list.horizontalHeaderItem(column).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.list.setColumnWidth(0, 200)
         for column, width in ((1, 112), (2, 108), (3, 108), (4, 148), (5, 148), (6, 116)):
             self.list.setColumnWidth(column, width)
@@ -257,6 +276,7 @@ class SchedulePage(QWidget):
         self.edit_button = QPushButton("편집…")
         self.edit_button.clicked.connect(self.edit_assignment)
         self.delete_button = QPushButton("삭제…")
+        self.delete_button.setProperty("destructive", True)
         self.delete_button.clicked.connect(self.delete_assignment)
         row.addWidget(self.edit_button)
         row.addWidget(self.delete_button)
@@ -266,7 +286,7 @@ class SchedulePage(QWidget):
         info_layout = QHBoxLayout(info)
         info_layout.setContentsMargins(12, 12, 12, 12)
         info_layout.setSpacing(24)
-        info_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        info_layout.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
         fields = QWidget()
         form = QFormLayout(fields)
         form.setContentsMargins(0, 0, 0, 0)
@@ -374,6 +394,7 @@ class SchedulePage(QWidget):
             self.timeline.setItem(row, 0, title)
             self.timeline.setItem(row, 1, QTableWidgetItem())
             amounts = QTableWidgetItem(f"{fee_text(item['fee'])}\n{fee_text(net_fee) if net_fee is not None else '미입력'}")
+            amounts.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             amounts.setToolTip(tooltip)
             amounts.setData(Qt.ItemDataRole.AccessibleTextRole, f"의뢰비 {fee_text(item['fee'])}, 실수령액 {fee_text(net_fee)}")
             self.timeline.setItem(row, 2, amounts)
