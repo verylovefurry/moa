@@ -12,3 +12,12 @@ dist/
 *.log
 .env*
 !.env.example
+.local/
+.gradle/
+**/build/
+local.properties
+signing.properties
+*.jks
+*.keystore
+*.p12
+*.session*

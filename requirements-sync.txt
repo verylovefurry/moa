@@ -1,0 +1,2 @@
+Telethon==1.45.0
+pycryptodome==3.21.0

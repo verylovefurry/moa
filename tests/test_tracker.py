@@ -113,7 +113,7 @@ class TrackingTests(unittest.TestCase):
         self.assertIsNone(self.tracker.active)
 
     def test_more_specific_url_wins(self):
-        self.store.db.execute("INSERT INTO targets VALUES ('specific','My doc','url','https://docs.google.com/document/d/123','#9b87c4','globe',1,0)")
+        self.store.db.execute("INSERT INTO targets(id,name,kind,matcher,color,icon,enabled,archived) VALUES ('specific','My doc','url','https://docs.google.com/document/d/123','#9b87c4','globe',1,0)")
         self.store.db.commit()
         self.tracker.browser_update({"browser": "chrome.exe", "url": "https://docs.google.com/document/d/123/edit", "focused": True})
         self.tick(1000, "chrome.exe")

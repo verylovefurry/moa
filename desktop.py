@@ -18,6 +18,10 @@ if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--apply-upd
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--recover-gaps":
     from recovery import run_recovery_job
     raise SystemExit(run_recovery_job(sys.argv[2]))
+if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--verify-sync-runtime":
+    from tools.verify_sync_runtime import verify
+    verify(sys.argv[2])
+    raise SystemExit(0)
 
 from PySide6.QtCore import QDate, QLocale, QSettings, QSize, QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette
@@ -137,6 +141,7 @@ class MoaWindow(QMainWindow):
         tools_menu = menu.addMenu("도구(&T)")
         tools_menu.addAction(self.action("설정…", self.open_settings, "Ctrl+,"))
         tools_menu.addAction(self.action("브라우저 확장 연결…", self.open_connection))
+        tools_menu.addAction(self.action("기기 연동…", self.open_sync))
         help_menu = menu.addMenu("도움말(&H)")
         help_menu.addAction(self.action("사용 안내", self.open_help, "F1"))
         help_menu.addAction(self.action("업데이트 확인…", self.open_updates))
@@ -198,6 +203,7 @@ class MoaWindow(QMainWindow):
         side.addWidget(self.build_tracking_controls())
         side.addWidget(divider())
         side.addWidget(button("브라우저 연결…", self.open_connection))
+        side.addWidget(button("기기 연동…", self.open_sync))
         settings_button = button("설정…", self.open_settings, "Ctrl+,")
         settings_button.setIcon(ui_icon("settings"))
         settings_button.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
@@ -621,7 +627,8 @@ class MoaWindow(QMainWindow):
             cell_layout.addWidget(checkbox)
             table.setCellWidget(row, 0, cell)
             table.setItem(row, 1, QTableWidgetItem(color_icon(target["color"]), target["name"]))
-            table.setItem(row, 2, QTableWidgetItem("프로그램" if target["kind"] == "app" else "URL"))
+            kind = "Android 앱" if target.get("platform") == "android" else "프로그램" if target["kind"] == "app" else "URL"
+            table.setItem(row, 2, QTableWidgetItem(kind))
             matcher = QTableWidgetItem(target["matcher"])
             matcher.setToolTip(target["matcher"])
             table.setItem(row, 3, matcher)
@@ -742,7 +749,8 @@ class MoaWindow(QMainWindow):
 
     def target_selection_changed(self):
         selected = self.selected_target_id() is not None
-        self.edit_target_button.setEnabled(selected)
+        target = self.target_map().get(self.selected_target_id(), {})
+        self.edit_target_button.setEnabled(selected and target.get("platform", "windows") == "windows")
         self.delete_target_button.setEnabled(selected)
 
     def add_target(self):
@@ -771,6 +779,11 @@ class MoaWindow(QMainWindow):
     def open_settings(self):
         SettingsDialog(self, self.backend, self.preferences, self.startup).exec()
         self.updater.enable_automatic()
+        self.refresh(force=True)
+
+    def open_sync(self):
+        from desktop_sync import SyncDialog
+        SyncDialog(self, self.backend.get_sync_service()).exec()
         self.refresh(force=True)
 
     def open_updates(self):

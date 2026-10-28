@@ -1,0 +1,71 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+def versionSource = file('../../version.py').text
+def moaVersion = (versionSource =~ /APP_VERSION = "([^"]+)"/)[0][1]
+def parts = moaVersion.tokenize('.').collect { it.toInteger() }
+def signingFile = rootProject.file('signing.properties')
+def signing = new Properties()
+if (signingFile.exists()) signingFile.withInputStream { signing.load(it) }
+
+android {
+    namespace 'com.verylovefurry.moa'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.verylovefurry.moa'
+        minSdk 26
+        targetSdk 35
+        versionCode parts[0] * 1000000 + parts[1] * 1000 + parts[2]
+        versionName moaVersion
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+    }
+    signingConfigs {
+        if (signingFile.exists()) {
+            production {
+                storeFile rootProject.file(signing.getProperty('storeFile'))
+                storePassword signing.getProperty('storePassword')
+                keyAlias signing.getProperty('keyAlias')
+                keyPassword signing.getProperty('keyPassword')
+            }
+        }
+    }
+    buildTypes {
+        debug { applicationIdSuffix '.dev'; versionNameSuffix '-test' }
+        release {
+            if (signingFile.exists()) signingConfig signingConfigs.production
+            minifyEnabled false
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    buildFeatures { buildConfig true }
+}
+
+tasks.register('copySharedPython', Copy) {
+    from('../..') {
+        include 'tracker.py', 'schedules.py', 'recovery.py', 'version.py', 'sync_core.py', 'telegram_sync.py', 'mobile_backend.py'
+    }
+    into layout.buildDirectory.dir('sharedPython')
+}
+tasks.named('preBuild').configure { dependsOn 'copySharedPython' }
+chaquopy {
+    defaultConfig {
+        version = '3.11'
+        pip {
+            install file('../../output/android-wheels/pyaes-1.6.1-py3-none-any.whl').absolutePath
+            install 'Telethon==1.45.0'
+            install 'pycryptodome==3.21.0'
+        }
+    }
+    sourceSets { main { srcDir layout.buildDirectory.dir('sharedPython') } }
+}
+tasks.matching { it.name.contains('Python') && it.name != 'copySharedPython' }.configureEach { dependsOn 'copySharedPython' }
+
+dependencies {
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}

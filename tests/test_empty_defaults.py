@@ -19,7 +19,7 @@ class EmptyDefaultsTests(unittest.TestCase):
             old=Store(path)
             seed_test_store(old)
             old.add_session("figma",1000,1100,"auto")
-            old.db.execute("INSERT INTO targets VALUES ('user','내 작업','app','custom.exe','#78a38c','app',1,0)")
+            old.db.execute("INSERT INTO targets(id,name,kind,matcher,color,icon,enabled,archived) VALUES ('user','내 작업','app','custom.exe','#78a38c','app',1,0)")
             old.db.execute("UPDATE targets SET name='수정한 기본 항목' WHERE id='code'")
             old.db.execute("DELETE FROM settings WHERE key='default_targets_removed_v1'")
             old.db.commit()

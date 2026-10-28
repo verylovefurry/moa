@@ -1,0 +1,13 @@
+<resources>
+    <style name="Theme.Moa" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">#3D6B5D</item>
+        <item name="colorPrimaryVariant">#31584C</item>
+        <item name="colorSecondary">#3D6B5D</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F6F8F6</item>
+        <item name="android:navigationBarColor">#F6F8F6</item>
+        <item name="android:windowBackground">#F6F8F6</item>
+        <item name="android:colorAccent">#3D6B5D</item>
+    </style>
+</resources>

@@ -40,6 +40,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix="packaged-update-",dir=output) as directory:
         root=Path(directory).resolve()
         assert root.is_relative_to(output)
+        sync_result=root/"sync-runtime.json"
+        subprocess.run([str(args.exe.resolve()),"--verify-sync-runtime",str(sync_result)],env=child_environment(),timeout=60,check=True)
+        assert json.loads(sync_result.read_text(encoding="utf-8"))["ok"]
+        print("Packaged sync runtime passed: SQLite journal, AES-GCM, DPAPI, no network.")
         source=root/"updates"/"9.1.0"/"Moa.exe"
         source.parent.mkdir(parents=True)
         shutil.copy2(args.exe,source)

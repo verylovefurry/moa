@@ -155,7 +155,7 @@ def make_handler(tracker, port):
                         fields = validate_target(data)
                         target_id = data.get("id")
                         if target_id:
-                            existing = tracker.store.db.execute("SELECT id FROM targets WHERE id=? AND archived=0", (target_id,)).fetchone()
+                            existing = tracker.store.db.execute("SELECT id FROM targets WHERE id=? AND archived=0 AND platform='windows'", (target_id,)).fetchone()
                             if not existing:
                                 raise ValueError("추적 대상을 찾을 수 없습니다.")
                             if tracker.active == target_id:

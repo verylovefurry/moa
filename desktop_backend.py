@@ -114,6 +114,9 @@ class DesktopBackend:
         self.tracker_thread = threading.Thread(target=self.tracker.loop, args=(self.stop_event,), daemon=True)
         self.maintenance_thread = threading.Thread(target=self._maintenance_loop, daemon=True)
         self.closed = False
+        self.sync_service = None
+        if (self.data_dir / "telegram-sync.dpapi").exists():
+            self.get_sync_service()
         if auto_track:
             self.tracker.set_enabled(True)
         self.http_thread.start()
@@ -122,6 +125,15 @@ class DesktopBackend:
 
     def state(self):
         return self.tracker.state()
+
+    def get_sync_service(self):
+        if self.sync_service is None:
+            from sync_secrets import WindowsSyncVault
+            from telegram_sync import SyncService
+            vault = WindowsSyncVault(self.data_dir)
+            self.sync_service = SyncService(self.store, self.tracker.lock, vault.load, vault.save,
+                backup=lambda: self.backup_to(self.backup_dir / "before-first-sync.sqlite3"))
+        return self.sync_service
 
     def command(self, command: str, payload: dict):
         # Reuse the tested mutation endpoints, including validation and idle rules.
@@ -198,6 +210,8 @@ class DesktopBackend:
     def close(self):
         if self.closed:
             return
+        if self.sync_service:
+            self.sync_service.close()
         self.stop_event.set()
         self.tracker_thread.join(3)
         self.maintenance_thread.join(3)

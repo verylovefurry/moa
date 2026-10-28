@@ -148,6 +148,9 @@ class Store:
         """)
         ensure_schedule_schema(self.db)
         ensure_recovery_schema(self.db)
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(targets)")}
+        if "platform" not in columns:
+            self.db.execute("ALTER TABLE targets ADD COLUMN platform TEXT NOT NULL DEFAULT 'windows'")
         fresh = not self.db.execute("SELECT 1 FROM settings WHERE key='initialized'").fetchone()
         if fresh:
             self.set_setting("idle_minutes", 5)
@@ -157,6 +160,8 @@ class Store:
         self.db.execute("INSERT OR IGNORE INTO settings VALUES ('switch_grace_minutes','5')")
         self.db.commit()
         self.remove_legacy_defaults()
+        from sync_core import ensure_sync_schema
+        ensure_sync_schema(self.db)
 
     def settings(self):
         return {row["key"]: json.loads(row["value"]) for row in self.db.execute("SELECT * FROM settings")}
@@ -198,10 +203,10 @@ class Store:
         self.db.execute("UPDATE sessions SET end=MAX(start, ?) WHERE id=?", (end, sid))
         self.db.commit()
 
-    def trim_idle(self, cutoff, run_start):
+    def trim_idle(self, cutoff, run_start, platform="windows"):
         # Include earlier target segments: the threshold can span a target change.
-        self.db.execute("DELETE FROM sessions WHERE source IN ('auto','timer') AND start>=? AND start>=?", (cutoff, run_start))
-        self.db.execute("UPDATE sessions SET end=? WHERE source IN ('auto','timer') AND end>? AND start>=?", (cutoff, cutoff, run_start))
+        self.db.execute("DELETE FROM sessions WHERE source IN ('auto','timer') AND start>=? AND start>=? AND target_id IN (SELECT id FROM targets WHERE platform=?)", (cutoff, run_start, platform))
+        self.db.execute("UPDATE sessions SET end=? WHERE source IN ('auto','timer') AND end>? AND start>=? AND target_id IN (SELECT id FROM targets WHERE platform=?)", (cutoff, cutoff, run_start, platform))
         self.db.commit()
 
     def daily(self):
@@ -263,7 +268,10 @@ class Tracker:
         self.browser_events[browser] = {"url": url, "focused": bool(payload.get("focused")), "seen": self.clock()}
 
     def match_target(self, exe, now):
-        targets = [t for t in self.store.targets() if t["enabled"] and not t["archived"]]
+        platform = getattr(self.activity, "platform", "windows")
+        targets = [t for t in self.store.targets() if t["enabled"] and not t["archived"] and t["platform"] == platform]
+        if platform == "android":
+            return next((t for t in targets if t["kind"] == "app" and t["matcher"] == exe), None)
         if exe in BROWSERS:
             event = self.browser_events.get(exe)
             if event and event["focused"] and now - event["seen"] < 40:
@@ -292,7 +300,7 @@ class Tracker:
             if idle >= settings["idle_minutes"] * 60:
                 if not self.idle_id:
                     cutoff = max(self.run_start, now - idle) if idle != float("inf") else now
-                    self.store.trim_idle(cutoff, self.run_start)
+                    self.store.trim_idle(cutoff, self.run_start, getattr(self.activity, "platform", "windows"))
                     self.session_id = None
                     self.session_start = None
                     self.active = None
