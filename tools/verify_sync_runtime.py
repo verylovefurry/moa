@@ -4,7 +4,10 @@ import tempfile
 
 
 def verify(destination):
+    import asyncio
     import json
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
     from tracker import Store
     from sync_core import SyncJournal, decode_batch, encode_batch, new_pairing_key
     from sync_secrets import WindowsSyncVault
@@ -22,4 +25,9 @@ def verify(destination):
         assert vault.load()["pairing_key"] == pairing
         vault.save({})
         store.db.close()
-    Path(destination).write_text(json.dumps({"ok": True, "crypto": "AES-256-GCM", "vault": "DPAPI", "network": False}), encoding="utf-8")
+    async def offline_client():
+        client = TelegramClient(StringSession(), 123456, "0" * 32, receive_updates=False)
+        assert not client.is_connected()
+        await client.disconnect()
+    asyncio.run(offline_client())
+    Path(destination).write_text(json.dumps({"ok": True, "crypto": "AES-256-GCM", "vault": "DPAPI", "telegram_client": True, "network": False}), encoding="utf-8")

@@ -32,7 +32,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Install Android platform
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Build native Android test package
         run: python tools/build_android.py
       - name: Android lint
